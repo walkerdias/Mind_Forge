@@ -2576,6 +2576,7 @@ function setupNavigation() {
   if (themeToggleSidebar) {
     themeToggleSidebar.addEventListener('click', toggleTheme);
   }
+}
 
 function setupEventListeners() {
     // Questões
