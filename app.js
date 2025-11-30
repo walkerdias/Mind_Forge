@@ -566,17 +566,18 @@ function saveQuestion(e) {
     }
 
     if (id) {
+        // ✅ CORREÇÃO: Usando Object.assign em vez de spread operator
         const index = BD.findIndex(q => q.id == id);
         if (index !== -1) {
-            BD[index] = {
-                ...BD[index],
-                ...novaQuestao,
-                stats: BD[index].stats || {
-                    correct: 0,
-                    wrong: 0
-                },
-                revisao: BD[index].revisao || false
-            };
+            BD[index] = Object.assign(
+                {}, 
+                BD[index], 
+                novaQuestao, 
+                {
+                    stats: BD[index].stats || { correct: 0, wrong: 0 },
+                    revisao: BD[index].revisao || false
+                }
+            );
         }
     } else {
         novaQuestao.id = Date.now();
@@ -977,12 +978,11 @@ function saveFC(e) {
     };
 
     if (id) {
+      // ✅ CORREÇÃO: Usando Object.assign em vez de spread operator
         const index = BD_FC.findIndex(f => f.id == id);
         if (index !== -1) {
-            BD_FC[index] = {
-                ...BD_FC[index],
-                ...novoFC
-            };
+            BD_FC[index] = Object.assign({}, 
+			BD_FC[index], novoFC);
         }
     } else {
         novoFC.id = Date.now();
@@ -1877,11 +1877,16 @@ function showStats() {
     `;
 
     html += `<h3 class="stat-section-title">Desempenho por Disciplina</h3>`;
-    const discArray = Object.keys(discMap).map(key => ({
-        name: key,
-        ...discMap[key],
-        total: discMap[key].correct + discMap[key].wrong
-    })).sort((a, b) => b.total - a.total);
+    // ✅ CORREÇÃO: Sem spread operator
+    const discArray = Object.keys(discMap).map(key => {
+        const discData = discMap[key];
+        return {
+            name: key,
+            correct: discData.correct,
+            wrong: discData.wrong,
+            total: discData.correct + discData.wrong
+        };
+    }).sort((a, b) => b.total - a.total);
 
     if (discArray.length === 0) {
         html += `<p style="text-align:center; color:var(--text-muted); padding: 20px;">Nenhuma questão respondida ainda.</p>`;
