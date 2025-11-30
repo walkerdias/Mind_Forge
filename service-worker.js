@@ -1,12 +1,12 @@
 const CACHE_NAME = "mindforge-v12-offline";
 const FILES_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
-  '/manifest.json',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  './', // Representa a raiz do escopo (ex: /repo-name/ ou /)
+  'index.html',
+  'style.css',
+  'app.js',
+  'manifest.json',
+  'icons/icon-192x192.png',
+  'icons/icon-512x512.png'
 ];
 
 // Instalação
@@ -36,19 +36,16 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName !== CACHE_NAME) {
-            console.log('🗑️ Service Worker: Removendo cache antigo', cacheName);
+            console.log('🗑️ Service Worker: Deletando cache antigo:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
-    }).then(() => {
-      console.log('✅ Service Worker: Ativação completa');
-      return self.clients.claim();
-    })
+    }).then(() => self.clients.claim())
   );
 });
 
-// Fetch - ESTRATÉGIA SPA CORRIGIDA
+// Fetch - Estratégia Cache, depois Network com Fallback
 self.addEventListener('fetch', (event) => {
   // Ignora requisições não-GET e chrome-extension
   if (event.request.method !== 'GET' || event.request.url.startsWith('chrome-extension://')) return;
@@ -61,10 +58,16 @@ self.addEventListener('fetch', (event) => {
           return response;
         }
 
-        // Se é uma navegação (HTML), sempre retorna index.html
+        // Se é uma navegação (HTML), sempre tenta retornar index.html do cache
         if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
+          return caches.match('index.html') // Usa o caminho relativo
+             .then(cacheResponse => {
+                 if (cacheResponse) return cacheResponse;
+                 return fetch(event.request); // Tenta a rede se index.html não estiver no cache (erro improvável após o install)
+             })
+             .catch(() => caches.match('index.html')); // Fallback final para index.html
         }
+
 
         // Para outros recursos, tenta buscar na rede
         return fetch(event.request)
@@ -84,8 +87,8 @@ self.addEventListener('fetch', (event) => {
             if (event.request.destination === 'image') {
               return new Response('', { status: 404 });
             }
-            // Para navegações que falharam, retorna index.html
-            return caches.match('/index.html');
+            // Retorna a página offline padrão ou um erro
+            return new Response('Sem conexão e recurso não cacheado.', { status: 503, statusText: 'Service Unavailable' });
           });
       })
   );
