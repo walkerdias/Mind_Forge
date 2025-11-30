@@ -1,37 +1,30 @@
-// app.js — Versão 9.2 (Correção PWA)
+// app.js — Versão 9.1 (Correção Offline)
 
 "use strict";
 
-// --- REGISTRO DO SERVICE WORKER CORRIGIDO PARA PWA ---
-// A base URL é o caminho até a pasta do index.html (ex: /repo-name/)
-// Isso é crucial para o GitHub Pages ou qualquer subdiretório de deploy,
-// pois o Service Worker precisa do caminho completo, incluindo o nome do repositório.
-const BASE_PATH = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
-
+// --- REGISTRO DO SERVICE WORKER (Substitui a bomba de cache) ---
 if ('serviceWorker' in navigator) {
-  // Aguarda a página carregar completamente
-  window.addEventListener('load', function() {
-    // Limpa service workers antigos
+    // Remove registros antigos primeiro
     navigator.serviceWorker.getRegistrations().then(function(registrations) {
-      for (let registration of registrations) {
-        registration.unregister();
-        console.log('Service Worker antigo removido');
-      }
+        for (let registration of registrations) {
+            registration.unregister();
+            console.log('Service Worker antigo removido:', registration.scope);
+        }
 
-      // Registra o novo service worker usando o BASE_PATH dinâmico
-      navigator.serviceWorker.register(BASE_PATH + 'service-worker.js', { scope: BASE_PATH })
-        .then(function(registration) {
-          console.log('✅ Service Worker registrado com sucesso no escopo:', registration.scope);
+        // Registra o novo Service Worker após limpeza
+        setTimeout(() => {
+            navigator.serviceWorker.register('/service-worker.js')
+                .then(function(registration) {
+                    console.log('✅ Service Worker registrado com sucesso: ', registration.scope);
 
-          // Verifica se há uma nova versão
-          registration.update();
-        })
-        .catch(function(error) {
-          console.log('❌ Falha no registro do Service Worker:', error);
-          console.error('Caminho de registro tentado:', BASE_PATH + 'service-worker.js', 'Escopo tentado:', BASE_PATH);
-        });
+                    // Verifica se há atualização
+                    registration.update();
+                })
+                .catch(function(error) {
+                    console.log('❌ Falha no registro do Service Worker: ', error);
+                });
+        }, 100);
     });
-  });
 }
 
 // --- VERIFICAÇÃO DE CONECTIVIDADE ---
@@ -44,2388 +37,2800 @@ function initConnectivity() {
     });
 
     window.addEventListener('offline', function() {
-        console.log('📴 Desconectado da internet');
+        console.log('🔴 Sem conexão com a internet');
         document.body.classList.add('offline');
-        showToast('Modo Offline Ativo!', 'warning');
+        showToast('Modo offline ativado - usando dados locais', 'info');
     });
 
-    // Estado inicial
+    // Verificar status inicial
     if (!navigator.onLine) {
         document.body.classList.add('offline');
-        showToast('Modo Offline Ativo!', 'warning');
+        console.log('Iniciando em modo offline');
     }
 }
 
-// --- VARIÁVEIS GLOBAIS ---
-// Estado global da aplicação
-let appState = {
-    currentModule: 'home', // 'home', 'quiz', 'flashcards', 'cronograma', 'ajuda'
-    currentQuiz: null, // Índice da pergunta atual no quiz
-    quizData: [], // Dados do quiz carregado (perguntas com tags)
-    flashcardData: [], // Dados dos flashcards
-    quizMode: 'normal', // 'normal' ou 'revisao'
-    flashcardStudyData: {
-        currentCardIndex: 0,
-        cardsToStudy: [],
-        studySet: 'all' // all, tag:<tag_name>
-    },
-    filterTag: null,
-    totalQuestions: 0,
-    dailyGoal: 0, // Meta diária de perguntas resolvidas
-    stats: {
-        totalCorrect: 0,
-        totalAttempted: 0,
-        correctByTag: {},
-        attemptedByTag: {},
-        correctByDisciplina: {},
-        attemptedByDisciplina: {},
-        dailyProgress: {}, // { 'YYYY-MM-DD': count }
-    },
-    cronograma: {
-        materias: [], // [{ nome, horasPorSemana, cor }]
-        dataFim: null,
-        semanas: [], // Estrutura para o cronograma gerado
-    },
-    settings: {
-        theme: 'dark' // 'dark' ou 'light'
-    },
-};
+// --- VERIFICAÇÃO DO PWA ---
+function checkPWAStatus() {
+    // Verifica se está instalado como PWA
+    if (window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true) {
+        console.log('📱 Executando como PWA instalado');
+    } else {
+        console.log('🌐 Executando no navegador');
+    }
 
-// Nomes de variáveis para localStorage
-const STORAGE_KEY_QUIZ = 'mindforge_quizData';
-const STORAGE_KEY_FLASHCARDS = 'mindforge_flashcardData';
-const STORAGE_KEY_STATS = 'mindforge_stats';
-const STORAGE_KEY_GOAL = 'mindforge_dailyGoal';
-const STORAGE_KEY_CRONOGRAMA = 'mindforge_cronograma';
-const STORAGE_KEY_SETTINGS = 'mindforge_settings';
+    // Verifica service worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+            console.log('✅ Service Worker pronto para uso offline');
+        }).catch(error => {
+            console.log('❌ Service Worker não está pronto:', error);
+        });
+    }
+}
 
-// Referências a elementos do DOM
-const mainContent = document.getElementById('mainContent');
-const headerTitle = document.getElementById('headerTitle');
-const menuDrawer = document.getElementById('menuDrawer');
-const dailyGoalDisplay = document.getElementById('dailyGoalDisplay');
-const dailyProgressIcon = document.getElementById('dailyProgressIcon');
+/* ---------------------------
+   Estado e Dados
+----------------------------*/
+let BD = JSON.parse(localStorage.getItem('BD_QUESTOES') || '[]');
+let BD_FC = JSON.parse(localStorage.getItem('BD_FLASHCARDS') || '[]');
+let SAVED_FILTERS = JSON.parse(localStorage.getItem('BD_FILTROS') || '{}');
+let DAILY_GOAL = JSON.parse(localStorage.getItem('BD_DAILY_GOAL') || '{"date": "", "count": 0, "target": 20}');
+let CURRENT_MODULE = 'dashboard';
+let CRONOGRAMA_DATA = JSON.parse(localStorage.getItem('BD_CRONOGRAMA') || 'null');
+let MATERIAS_CRONOGRAMA = JSON.parse(localStorage.getItem('BD_MATERIAS') || '[]');
+let MODELOS_CRONOGRAMA = JSON.parse(localStorage.getItem('BD_MODELOS_CRONOGRAMA') || '[]');
 
-// Mapeamento de Cores para o Cronograma
-const colors = [
-    '#E74C3C', '#3498DB', '#27AE60', '#F39C12', '#9B59B6',
-    '#1ABC9C', '#D35400', '#2980B9', '#8E44AD', '#C0392B'
-];
-let colorIndex = 0;
+// Quiz / Treino State
+let inQuiz = false;
+let quizIndex = 0;
+let quizOrder = [];
+let timerInterval = null;
+let startTime = 0;
 
-// --- FUNÇÕES DE UTILIDADE ---
+// Flashcard Player State
+let fcIndex = 0;
+let fcList = [];
 
-/**
- * Exibe um toast (notificação temporária).
- * @param {string} message - A mensagem a ser exibida.
- * @param {string} type - O tipo de notificação ('success', 'warning', 'danger', 'info').
- */
-function showToast(message, type = 'info') {
-    const toastContainer = document.getElementById('toastContainer');
-    if (!toastContainer) return;
+let currentPage = 1;
+const ITEMS_PER_PAGE = 20;
+let questionsSinceBackup = 0;
 
+// Dashboard State
+let dashboardData = JSON.parse(localStorage.getItem('BD_DASHBOARD') || '{"lastUpdate": "", "weeklyStats": {}}');
+
+/* ---------------------------
+   Sistema de Módulos e Navegação
+----------------------------*/
+function switchModule(moduleName) {
+    // Esconde todos os módulos
+    document.querySelectorAll('.module').forEach(module => {
+        module.classList.remove('active');
+    });
+
+    // Remove active de todos os itens do menu
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+    });
+
+    // Ativa o módulo selecionado
+    const targetModule = document.getElementById(moduleName);
+    if (targetModule) {
+        targetModule.classList.add('active');
+    }
+
+    // Ativa o item do menu correspondente
+    const menuItem = document.querySelector(`[data-module="${moduleName}"]`);
+    if (menuItem) {
+        menuItem.classList.add('active');
+    }
+
+    CURRENT_MODULE = moduleName;
+
+    // Fecha menu mobile se aberto
+    closeMobileMenu();
+
+    // Executa funções específicas do módulo
+    switch (moduleName) {
+        case 'dashboard':
+            updateDashboard();
+            break;
+        case 'questoes':
+            renderQuestions();
+            break;
+        case 'flashcards':
+            renderFlashcardsList();
+            updateFCFilters(); // ← ADICIONAR ESTA LINHA
+            break;
+        case 'estatisticas':
+            loadStatisticsModule();
+            break;
+        case 'metas':
+            loadGoalsModule();
+            break;
+        case 'backup':
+            loadBackupModule();
+            break;
+        case 'cronograma':
+            // Já é gerenciado pelo cronograma existente
+            break;
+    }
+
+    // Salva o último módulo visitado
+    localStorage.setItem('LAST_MODULE', moduleName);
+}
+
+function updateDashboard() {
+    // Atualiza meta diária
+    const goalElement = document.getElementById('dashboardGoal');
+    const progressElement = document.getElementById('dashboardProgressFill');
+    if (goalElement && progressElement) {
+        goalElement.textContent = `${DAILY_GOAL.count}/${DAILY_GOAL.target}`;
+        const progress = (DAILY_GOAL.count / DAILY_GOAL.target) * 100;
+        progressElement.style.width = `${Math.min(progress, 100)}%`;
+    }
+
+    // Atualiza contadores
+    const questionsElement = document.getElementById('dashboardQuestions');
+    const flashcardsElement = document.getElementById('dashboardFlashcards');
+    if (questionsElement) questionsElement.textContent = BD.length;
+    if (flashcardsElement) flashcardsElement.textContent = BD_FC.length;
+
+    // Atualiza progresso do cronograma
+    const scheduleElement = document.getElementById('dashboardSchedule');
+    if (scheduleElement && CRONOGRAMA_DATA) {
+        const progress = calcularProgressoCronograma(CRONOGRAMA_DATA);
+        scheduleElement.textContent = `${progress}%`;
+    }
+
+    // Atualiza progresso na sidebar
+    updateSidebarProgress();
+
+    // Atualiza tempo atual
+    updateCurrentTime();
+
+    // Atualiza atividade recente
+    updateRecentActivity();
+}
+
+function updateSidebarProgress() {
+    const progressElement = document.getElementById('sidebarProgress');
+    const progressFill = document.getElementById('sidebarProgressFill');
+
+    if (progressElement && progressFill) {
+        // Calcula progresso geral baseado em múltiplos fatores
+        let totalProgress = 0;
+        let factors = 0;
+
+        // Progresso da meta diária (25%)
+        const dailyProgress = (DAILY_GOAL.count / DAILY_GOAL.target) * 100;
+        totalProgress += Math.min(dailyProgress, 100) * 0.25;
+        factors += 0.25;
+
+        // Progresso do cronograma (25%)
+        if (CRONOGRAMA_DATA) {
+            const scheduleProgress = calcularProgressoCronograma(CRONOGRAMA_DATA);
+            totalProgress += scheduleProgress * 0.25;
+            factors += 0.25;
+        }
+
+        // Questões respondidas (25%)
+        const totalQuestions = BD.length;
+        const answeredQuestions = BD.filter(q => q.stats && (q.stats.correct + q.stats.wrong) > 0).length;
+        const questionProgress = totalQuestions > 0 ? (answeredQuestions / totalQuestions) * 100 : 0;
+        totalProgress += questionProgress * 0.25;
+        factors += 0.25;
+
+        // Flashcards estudados (25%)
+        const totalFlashcards = BD_FC.length;
+        // Simulação - na versão real poderia rastrear flashcards estudados
+        const flashcardProgress = totalFlashcards > 0 ? Math.min((totalFlashcards / 50) * 100, 100) : 0;
+        totalProgress += flashcardProgress * 0.25;
+        factors += 0.25;
+
+        // Calcula média final
+        const finalProgress = factors > 0 ? totalProgress / factors : 0;
+
+        progressElement.textContent = `${Math.round(finalProgress)}%`;
+        progressFill.style.width = `${finalProgress}%`;
+    }
+}
+
+function updateCurrentTime() {
+    const timeElement = document.getElementById('currentTime');
+    if (timeElement) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        const dateString = now.toLocaleDateString('pt-BR', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long'
+        });
+
+        timeElement.innerHTML = `
+      <div style="font-size: 1.1rem; font-weight: 600;">${timeString}</div>
+      <div style="font-size: 0.8rem; opacity: 0.8;">${dateString}</div>
+    `;
+    }
+}
+
+function updateRecentActivity() {
+    const activityElement = document.getElementById('recentActivity');
+    if (!activityElement) return;
+
+    // Simula atividades recentes - na versão real viria do histórico
+    const activities = [];
+
+    // Adiciona atividade de questões respondidas hoje
+    if (DAILY_GOAL.count > 0) {
+        activities.push({
+            icon: '🎯',
+            text: `Resolveu ${DAILY_GOAL.count} questões hoje`,
+            time: 'Hoje'
+        });
+    }
+
+    // Adiciona atividade de novas questões
+    const recentQuestions = BD.filter(q => {
+        const questionDate = new Date(q.id);
+        const today = new Date();
+        return (today - questionDate) < (24 * 60 * 60 * 1000); // Últimas 24h
+    });
+
+    if (recentQuestions.length > 0) {
+        activities.push({
+            icon: '📝',
+            text: `Adicionou ${recentQuestions.length} novas questões`,
+            time: 'Hoje'
+        });
+    }
+
+    // Adiciona placeholder se não houver atividades
+    if (activities.length === 0) {
+        activities.push({
+            icon: '📚',
+            text: 'Comece a estudar para ver suas atividades aqui!',
+            time: 'Vamos começar?'
+        });
+    }
+
+    activityElement.innerHTML = activities.map(activity => `
+    <div class="activity-item">
+      <span class="activity-icon">${activity.icon}</span>
+      <div class="activity-content">
+        <p>${activity.text}</p>
+        <span class="activity-time">${activity.time}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+/* ---------------------------
+   Mobile Menu Handling
+----------------------------*/
+function initMobileMenu() {
+    const mobileToggle = document.getElementById('mobileMenuToggle');
+    const sidebar = document.querySelector('.sidebar');
+
+    if (mobileToggle && sidebar) {
+        mobileToggle.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+        });
+    }
+
+    // Fecha menu ao clicar em um item (em mobile)
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            if (window.innerWidth <= 1024) {
+                closeMobileMenu();
+            }
+        });
+    });
+}
+
+function closeMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        sidebar.classList.remove('open');
+    }
+}
+
+/* ---------------------------
+   Módulos Específicos
+----------------------------*/
+function loadStatisticsModule() {
+    // Reutiliza a função showStats existente
+    showStats();
+}
+
+function loadGoalsModule() {
+    // Atualiza os elementos de metas
+    const currentProgress = document.getElementById('currentProgress');
+    const targetProgress = document.getElementById('targetProgress');
+    const goalProgressFill = document.getElementById('goalProgressFill');
+    const dailyGoalInput = document.getElementById('dailyGoalInput');
+
+    if (currentProgress) currentProgress.textContent = DAILY_GOAL.count;
+    if (targetProgress) targetProgress.textContent = DAILY_GOAL.target;
+    if (goalProgressFill) {
+        const progress = (DAILY_GOAL.count / DAILY_GOAL.target) * 100;
+        goalProgressFill.style.width = `${Math.min(progress, 100)}%`;
+    }
+    if (dailyGoalInput) dailyGoalInput.value = DAILY_GOAL.target;
+
+    // Atualiza estatísticas da semana
+    updateWeeklyStats();
+}
+
+function updateWeeklyStats() {
+    const weekStatsElement = document.getElementById('weekStats');
+    if (!weekStatsElement) return;
+
+    // Simula dados da semana - na versão real viria do histórico
+    const weekDays = ['Seg', 'Ter', 'Qua', 'Qui', 'Qua', 'Sáb', 'Dom'];
+    const today = new Date().getDay();
+    const weekData = weekDays.map((day, index) => {
+        const isToday = index === (today === 0 ? 6 : today - 1); // Ajuste para DOM começando em 0
+        const count = isToday ? DAILY_GOAL.count : Math.floor(Math.random() * 25);
+
+        return {
+            day,
+            count,
+            isToday
+        };
+    });
+
+    weekStatsElement.innerHTML = weekData.map(day => `
+    <div class="day-stat ${day.isToday ? 'today' : ''}" style="
+      background: var(--card); 
+      padding: 10px; 
+      border-radius: 8px; 
+      text-align: center;
+      border: ${day.isToday ? '2px solid var(--accent)' : '1px solid var(--border)'};
+    ">
+      <div style="font-size: 0.8rem; color: var(--text-muted);">${day.day}</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary);">${day.count}</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted);">questões</div>
+    </div>
+  `).join('');
+}
+
+function updateDailyGoalTarget() {
+    const input = document.getElementById('dailyGoalInput');
+    if (input) {
+        const newTarget = parseInt(input.value);
+        if (newTarget > 0 && newTarget <= 100) {
+            DAILY_GOAL.target = newTarget;
+            localStorage.setItem('BD_DAILY_GOAL', JSON.stringify(DAILY_GOAL));
+            updateDailyGoalUI();
+            loadGoalsModule(); // Recarrega o módulo
+            showToast(`Meta diária atualizada para ${newTarget} questões!`, 'success');
+        }
+    }
+}
+
+function loadBackupModule() {
+    // Atualiza informações do backup
+    const backupQuestions = document.getElementById('backupQuestions');
+    const backupFlashcards = document.getElementById('backupFlashcards');
+    const lastBackup = document.getElementById('lastBackup');
+
+    if (backupQuestions) backupQuestions.textContent = BD.length;
+    if (backupFlashcards) backupFlashcards.textContent = BD_FC.length;
+    if (lastBackup) {
+        const lastBackupDate = localStorage.getItem('LAST_BACKUP_DATE');
+        lastBackup.textContent = lastBackupDate || 'Nunca';
+    }
+}
+
+/* ---------------------------
+   Inicialização do Dashboard
+----------------------------*/
+function initDashboard() {
+    // Atualiza dashboard imediatamente
+    updateDashboard();
+
+    // Atualiza dashboard a cada minuto
+    setInterval(updateDashboard, 60000);
+
+    // Atualiza estatísticas semanais
+    updateWeeklyStats();
+}
+
+/* ---------------------------
+   Utilitários e Meta
+----------------------------*/
+function showToast(msg, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-
-    toastContainer.appendChild(toast);
-
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
     setTimeout(() => {
-        toast.classList.add('fade-out');
-        toast.addEventListener('transitionend', () => toast.remove());
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
 
-/**
- * Salva o estado da aplicação no localStorage.
- */
-function saveState() {
-    localStorage.setItem(STORAGE_KEY_QUIZ, JSON.stringify(appState.quizData));
-    localStorage.setItem(STORAGE_KEY_FLASHCARDS, JSON.stringify(appState.flashcardData));
-    localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(appState.stats));
-    localStorage.setItem(STORAGE_KEY_GOAL, appState.dailyGoal.toString());
-    localStorage.setItem(STORAGE_KEY_CRONOGRAMA, JSON.stringify(appState.cronograma));
-    localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(appState.settings));
-}
-
-/**
- * Carrega o estado da aplicação do localStorage.
- */
-function loadState() {
-    // Carregar dados de perguntas (quiz)
-    const storedQuiz = localStorage.getItem(STORAGE_KEY_QUIZ);
-    if (storedQuiz) {
-        try {
-            appState.quizData = JSON.parse(storedQuiz);
-            appState.totalQuestions = appState.quizData.length;
-        } catch (e) {
-            console.error("Erro ao carregar dados do Quiz", e);
-            appState.quizData = [];
-        }
-    }
-
-    // Carregar flashcards
-    const storedFlashcards = localStorage.getItem(STORAGE_KEY_FLASHCARDS);
-    if (storedFlashcards) {
-        try {
-            appState.flashcardData = JSON.parse(storedFlashcards);
-        } catch (e) {
-            console.error("Erro ao carregar Flashcards", e);
-            appState.flashcardData = [];
-        }
-    }
-
-    // Carregar estatísticas
-    const storedStats = localStorage.getItem(STORAGE_KEY_STATS);
-    if (storedStats) {
-        try {
-            appState.stats = JSON.parse(storedStats);
-            // Limpa o progresso diário se o dia mudou
-            const today = new Date().toISOString().slice(0, 10);
-            if (!appState.stats.dailyProgress[today]) {
-                appState.stats.dailyProgress = {}; // Limpa os anteriores, mantém apenas o atual
-                appState.stats.dailyProgress[today] = 0;
-            }
-        } catch (e) {
-            console.error("Erro ao carregar estatísticas", e);
-            appState.stats = { totalCorrect: 0, totalAttempted: 0, correctByTag: {}, attemptedByTag: {}, correctByDisciplina: {}, attemptedByDisciplina: {}, dailyProgress: {} };
-        }
-    }
-
-    // Carregar meta diária
-    const storedGoal = localStorage.getItem(STORAGE_KEY_GOAL);
-    appState.dailyGoal = storedGoal ? parseInt(storedGoal) : 10; // Meta padrão de 10
-
-    // Carregar cronograma
-    const storedCronograma = localStorage.getItem(STORAGE_KEY_CRONOGRAMA);
-    if (storedCronograma) {
-        try {
-            const loadedCronograma = JSON.parse(storedCronograma);
-            // Corrige o formato da data se for string (para uso com new Date())
-            if (loadedCronograma.dataFim) {
-                loadedCronograma.dataFim = new Date(loadedCronograma.dataFim);
-            }
-            appState.cronograma = loadedCronograma;
-        } catch (e) {
-            console.error("Erro ao carregar cronograma", e);
-            appState.cronograma = { materias: [], dataFim: null, semanas: [] };
-        }
-    }
-
-    // Carregar configurações
-    const storedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
-    if (storedSettings) {
-        try {
-            appState.settings = JSON.parse(storedSettings);
-        } catch (e) {
-            console.error("Erro ao carregar configurações", e);
-            appState.settings = { theme: 'dark' };
-        }
+function saveBD() {
+    try {
+        localStorage.setItem('BD_QUESTOES', JSON.stringify(BD));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError') showToast("Erro: Limite cheio!", "error");
     }
 }
 
-/**
- * Atualiza a interface de acordo com o estado.
- */
-function updateUI() {
-    renderMenu();
-    updateTheme();
-    updateDailyGoalDisplay();
-
-    // Renderiza o módulo atual
-    switch (appState.currentModule) {
-        case 'home':
-            renderHome();
-            break;
-        case 'quiz':
-            renderQuizInterface();
-            break;
-        case 'flashcards':
-            renderFlashcardsModule();
-            break;
-        case 'flashcardStudy':
-            renderFlashcardStudy();
-            break;
-        case 'cronograma':
-            renderCronogramaModule();
-            break;
-        case 'ajuda':
-            renderAjudaModule();
-            break;
+function saveBD_FC() {
+    try {
+        localStorage.setItem('BD_FLASHCARDS', JSON.stringify(BD_FC));
+    } catch (e) {
+        showToast("Erro: Limite cheio!", "error");
     }
 }
 
-/**
- * Altera o módulo de visualização principal.
- * @param {string} moduleName - Nome do módulo ('home', 'quiz', 'flashcards', 'cronograma', 'ajuda').
- */
-function switchModule(moduleName) {
-    if (appState.currentModule === 'flashcardStudy' && moduleName !== 'flashcardStudy') {
-        // Confirmação para sair do estudo de flashcards
-        if (!confirmAction('Tem certeza que deseja sair do modo estudo? O progresso da sessão atual pode ser perdido.')) {
-            return;
-        }
-    }
-
-    appState.currentModule = moduleName;
-    // Oculta o drawer
-    menuDrawer.classList.remove('open');
-    saveState();
-    updateUI();
+function escapeHtml(txt) {
+    return String(txt || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br>');
 }
 
-/**
- * Função genérica de confirmação que usa um modal ou confirmação nativa.
- * @param {string} message - Mensagem de confirmação.
- * @returns {boolean} - True se confirmado, False caso contrário.
- */
-function confirmAction(message) {
-    // Neste ambiente limitado, usamos o confirm() nativo, mas em um PWA real seria um modal customizado.
-    return window.confirm(message);
+function renderEnunciadoWithImage(enunciado, imagemBase64, isQuiz = false) {
+    const safeText = escapeHtml(enunciado || "");
+    if (!imagemBase64) return safeText;
+    const imgClass = isQuiz ? "q-image quiz-image" : "q-image";
+    const imgTag = `<img src="${imagemBase64}" class="${imgClass}" alt="Imagem">`;
+    const placeHolder = '[IMAGEM]';
+    return safeText.includes(placeHolder) ? safeText.replace(placeHolder, imgTag) : `${imgTag}<br>${safeText}`;
 }
 
-// --- TEMA E CONFIGURAÇÕES ---
-
-/**
- * Atualiza o tema da aplicação ('dark' ou 'light').
- */
-function updateTheme() {
-    document.body.className = appState.settings.theme === 'light' ? 'light-mode' : '';
-    // Atualiza o texto do botão no menu
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        themeToggle.textContent = appState.settings.theme === 'light' ? 'Modo Escuro' : 'Modo Claro';
-    }
-}
-
-/**
- * Alterna o tema e salva a preferência.
- */
-function toggleTheme() {
-    appState.settings.theme = appState.settings.theme === 'dark' ? 'light' : 'dark';
-    updateTheme();
-    saveState();
-}
-
-// --- RENDERIZAÇÃO DO MENU E CABEÇALHO ---
-
-/**
- * Renderiza o menu lateral (Drawer).
- */
-function renderMenu() {
-    const navItems = document.getElementById('navItems');
-    if (!navItems) return;
-
-    // Remove event listeners para evitar duplicação (não é ideal, mas simplifica)
-    document.getElementById('btnMenuToggle').onclick = () => menuDrawer.classList.toggle('open');
-    document.getElementById('btnCloseDrawer').onclick = () => menuDrawer.classList.remove('open');
-
-    // Cria os botões de navegação
-    navItems.innerHTML = `
-        <button class="menu-item ${appState.currentModule === 'home' ? 'active' : ''}" onclick="switchModule('home')">
-            <i class="fas fa-home"></i> Início
-        </button>
-        <button class="menu-item ${appState.currentModule === 'quiz' ? 'active' : ''}" onclick="switchModule('quiz')">
-            <i class="fas fa-question-circle"></i> Gerenciador de Perguntas
-            <span class="count">${appState.totalQuestions}</span>
-        </button>
-        <button class="menu-item ${appState.currentModule === 'flashcards' ? 'active' : ''}" onclick="switchModule('flashcards')">
-            <i class="fas fa-layer-group"></i> Gerenciador de Flashcards
-            <span class="count">${appState.flashcardData.length}</span>
-        </button>
-        <button class="menu-item ${appState.currentModule === 'cronograma' ? 'active' : ''}" onclick="switchModule('cronograma')">
-            <i class="fas fa-calendar-alt"></i> Cronograma Inteligente
-        </button>
-        <button class="menu-item" onclick="document.getElementById('statsModal').showModal()">
-            <i class="fas fa-chart-bar"></i> Estatísticas
-        </button>
-        <button class="menu-item" onclick="switchModule('ajuda')">
-            <i class="fas fa-info-circle"></i> Ajuda & Config
-        </button>
-        <div class="menu-divider"></div>
-        <button id="themeToggle" class="menu-item" onclick="toggleTheme()">
-            ${appState.settings.theme === 'light' ? '<i class="fas fa-moon"></i> Modo Escuro' : '<i class="fas fa-sun"></i> Modo Claro'}
-        </button>
-    `;
-
-    // Adiciona o evento de fechar ao clicar fora do drawer
-    document.addEventListener('click', (e) => {
-        if (menuDrawer.classList.contains('open') && !menuDrawer.contains(e.target) && e.target !== document.getElementById('btnMenuToggle')) {
-            menuDrawer.classList.remove('open');
-        }
-    });
-
-    // Renderiza as estatísticas no modal (já que o botão está aqui)
-    renderStatsModal();
-}
-
-// --- GESTÃO DE METAS DIÁRIAS ---
-
-/**
- * Atualiza a meta diária.
- * @param {number} newGoal - Novo valor da meta.
- */
-function updateDailyGoalTarget(newGoal) {
-    appState.dailyGoal = parseInt(newGoal);
-    if (isNaN(appState.dailyGoal) || appState.dailyGoal < 1) {
-        appState.dailyGoal = 10;
-    }
-    saveState();
-    updateDailyGoalDisplay();
-    showToast(`Meta diária atualizada para ${appState.dailyGoal} perguntas/dia!`, 'success');
-}
-
-/**
- * Incrementa o progresso diário e salva.
- */
-function incrementDailyProgress() {
-    const today = new Date().toISOString().slice(0, 10);
-    if (!appState.stats.dailyProgress[today]) {
-        appState.stats.dailyProgress[today] = 0;
-    }
-    appState.stats.dailyProgress[today]++;
-    saveState();
-    updateDailyGoalDisplay();
-}
-
-/**
- * Atualiza a exibição da meta diária no cabeçalho.
- */
-function updateDailyGoalDisplay() {
-    const today = new Date().toISOString().slice(0, 10);
-    const progress = appState.stats.dailyProgress[today] || 0;
-    const goal = appState.dailyGoal;
-    const percentage = goal > 0 ? Math.min(100, (progress / goal) * 100) : 0;
-
-    dailyGoalDisplay.textContent = `${progress}/${goal}`;
-
-    // Atualiza o ícone de progresso (círculo)
-    dailyProgressIcon.style.backgroundImage = `conic-gradient(
-        var(--success) 0% ${percentage}%,
-        var(--border) ${percentage}% 100%
-    )`;
-
-    // Se a meta foi atingida
-    if (progress >= goal) {
-        dailyProgressIcon.classList.add('completed');
-    } else {
-        dailyProgressIcon.classList.remove('completed');
-    }
-}
-
-// --- MÓDULO INÍCIO ---
-
-/**
- * Renderiza a tela inicial.
- */
-function renderHome() {
-    headerTitle.textContent = 'MindForge - Forjando Conhecimento';
-
-    const today = new Date().toISOString().slice(0, 10);
-    const progress = appState.stats.dailyProgress[today] || 0;
-    const goal = appState.dailyGoal;
-    const progressText = progress >= goal ? 'Meta diária concluída! 🎉' : `Faltam ${goal - progress} para atingir sua meta.`;
-    const totalFlashcards = appState.flashcardData.length;
-    const totalQuizQuestions = appState.quizData.length;
-
-    mainContent.innerHTML = `
-        <section class="module-home">
-            <h2 class="section-title">Bem-vindo(a) ao MindForge!</h2>
-
-            <div class="summary-cards">
-                <div class="card" onclick="switchModule('cronograma')">
-                    <i class="fas fa-calendar-alt icon-large accent"></i>
-                    <h3>Cronograma</h3>
-                    <p>${appState.cronograma.materias.length > 0 ? 'Cronograma Ativo' : 'Configure seu Cronograma'}</p>
-                </div>
-                <div class="card" onclick="switchModule('quiz')">
-                    <i class="fas fa-question-circle icon-large primary"></i>
-                    <h3>Banco de Perguntas</h3>
-                    <p>${totalQuizQuestions} Questões Cadastradas</p>
-                </div>
-                <div class="card" onclick="switchModule('flashcards')">
-                    <i class="fas fa-layer-group icon-large primary"></i>
-                    <h3>Flashcards</h3>
-                    <p>${totalFlashcards} Flashcards Cadastrados</p>
-                </div>
-                <div class="card" onclick="document.getElementById('statsModal').showModal()">
-                    <i class="fas fa-chart-bar icon-large success"></i>
-                    <h3>Seu Progresso Hoje</h3>
-                    <p>${progress} de ${goal} | ${progressText}</p>
-                </div>
-            </div>
-
-            <div class="home-actions">
-                <button class="btn primary large" onclick="initQuiz()">
-                    <i class="fas fa-brain"></i> Iniciar Quiz de Prática
-                </button>
-                <button class="btn accent large" onclick="startFlashcardStudy()">
-                    <i class="fas fa-pencil-alt"></i> Iniciar Estudo de Flashcards
-                </button>
-            </div>
-
-            <div class="help-links">
-                <p>Novo por aqui? <a href="#" onclick="switchModule('ajuda'); return false;">Veja o Guia Rápido</a></p>
-            </div>
-        </section>
-    `;
-}
-
-// --- MÓDULO GERENCIADOR DE PERGUNTAS (QUIZ) ---
-
-/**
- * Renderiza a interface do gerenciador de perguntas.
- */
-function renderQuizInterface() {
-    headerTitle.textContent = 'Gerenciador de Perguntas';
-    appState.currentQuiz = null; // Reseta o estado do quiz
-
-    const tags = getUniqueTags(appState.quizData.concat(appState.flashcardData)); // Combina tags
-    const tagOptions = tags.map(tag => `<option value="${tag}">${tag}</option>`).join('');
-
-    mainContent.innerHTML = `
-        <section class="module-quiz">
-            <div class="controls-bar">
-                <button class="btn primary" onclick="renderAddQuestionForm()">
-                    <i class="fas fa-plus-circle"></i> Adicionar Pergunta
-                </button>
-                <button class="btn accent" onclick="initQuiz()">
-                    <i class="fas fa-brain"></i> Iniciar Treino
-                </button>
-                <div class="filter-group">
-                    <select id="tagFilter" onchange="filterByTag(this.value)">
-                        <option value="">Filtrar por Tag (Todos)</option>
-                        ${tagOptions}
-                    </select>
-                </div>
-            </div>
-
-            <div id="quizListContainer" class="list-container">
-                <!-- Lista de perguntas será renderizada aqui -->
-            </div>
-
-            <div id="paginationControls" class="pagination-controls">
-                <!-- Controles de paginação aqui -->
-            </div>
-        </section>
-    `;
-
-    renderQuizList();
-}
-
-/**
- * Renderiza o formulário de adição/edição de pergunta.
- * @param {object} [question] - Pergunta a ser editada (opcional).
- */
-function renderAddQuestionForm(question = null) {
-    headerTitle.textContent = question ? 'Editar Pergunta' : 'Adicionar Nova Pergunta';
-
-    const isEdit = !!question;
-    const tags = getUniqueTags(appState.quizData.concat(appState.flashcardData)); // Tags existentes
-    const currentTags = question ? (question.tags || []).join(', ') : '';
-
-    mainContent.innerHTML = `
-        <section class="module-form">
-            <h2 class="section-title">${isEdit ? 'Editar Pergunta' : 'Adicionar Pergunta'}</h2>
-
-            <form id="questionForm" class="data-form">
-                <div class="form-group">
-                    <label for="disciplina">Disciplina/Matéria:</label>
-                    <input type="text" id="disciplina" value="${question ? (question.disciplina || '') : ''}" required>
-                </div>
-                <div class="form-group">
-                    <label for="enunciado">Enunciado/Pergunta:</label>
-                    <textarea id="enunciado" rows="4" required>${question ? question.enunciado : ''}</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>Opções (Marque a correta):</label>
-                    <div id="optionsContainer">
-                        <!-- Opções serão adicionadas aqui -->
-                    </div>
-                    <button type="button" class="btn secondary small" onclick="addOptionField()">Adicionar Opção</button>
-                </div>
-
-                <div class="form-group">
-                    <label for="resolucao">Resolução/Explicação:</label>
-                    <textarea id="resolucao" rows="4">${question ? question.resolucao : ''}</textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="tags">Tags (Separadas por vírgula):</label>
-                    <input type="text" id="tags" value="${currentTags}">
-                    <div class="tag-suggestions" id="tagSuggestions">
-                        ${tags.map(tag => `<span class="tag suggestion-tag" onclick="selectTag('${tag}')">${tag}</span>`).join('')}
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn primary">
-                        ${isEdit ? '<i class="fas fa-save"></i> Salvar Edição' : '<i class="fas fa-plus-circle"></i> Adicionar'}
-                    </button>
-                    <button type="button" class="btn secondary" onclick="renderQuizInterface()">
-                        <i class="fas fa-times-circle"></i> Cancelar
-                    </button>
-                </div>
-            </form>
-        </section>
-    `;
-
-    // Função para adicionar campos de opção e preencher se for edição
-    function addOptionField(text = '', isCorrect = false) {
-        const container = document.getElementById('optionsContainer');
-        const index = container.children.length;
-        const div = document.createElement('div');
-        div.className = 'option-field';
-        div.innerHTML = `
-            <input type="radio" name="correctOption" id="correct${index}" value="${index}" ${isCorrect ? 'checked' : ''} required>
-            <input type="text" id="option${index}" value="${text}" placeholder="Texto da Opção ${index + 1}" required>
-            <label for="correct${index}" class="radio-label">Correta</label>
-            <button type="button" class="btn danger small" onclick="this.parentElement.remove()">Remover</button>
-        `;
-        container.appendChild(div);
-    }
-
-    // Preenche opções se for edição
-    if (question && question.opcoes) {
-        question.opcoes.forEach((opt, index) => {
-            addOptionField(opt.texto, opt.correta);
-        });
-    } else {
-        // Adiciona 3 opções padrão para nova pergunta
-        addOptionField();
-        addOptionField();
-        addOptionField();
-    }
-
-    // Adiciona o listener para o formulário
-    document.getElementById('questionForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        saveQuestion(question ? question.id : null);
-    });
-}
-
-/**
- * Salva uma nova pergunta ou edita uma existente.
- * @param {string} [id] - ID da pergunta a ser editada (opcional).
- */
-function saveQuestion(id = null) {
-    const disciplina = document.getElementById('disciplina').value.trim();
-    const enunciado = document.getElementById('enunciado').value.trim();
-    const resolucao = document.getElementById('resolucao').value.trim();
-    const tagsInput = document.getElementById('tags').value;
-    const tags = tagsInput.split(',').map(tag => tag.trim().toLowerCase()).filter(tag => tag);
-
-    const optionsContainer = document.getElementById('optionsContainer');
-    const optionFields = optionsContainer.querySelectorAll('.option-field');
-
-    if (optionFields.length < 2) {
-        showToast('Adicione pelo menos duas opções.', 'danger');
-        return;
-    }
-
-    let correctIndex = -1;
-    const opcoes = Array.from(optionFields).map((field, index) => {
-        const inputRadio = field.querySelector(`input[name="correctOption"]`);
-        const inputText = field.querySelector(`input[id="option${index}"]`);
-
-        if (inputRadio.checked) {
-            correctIndex = index;
-        }
-
-        return {
-            texto: inputText.value.trim(),
-            correta: inputRadio.checked
+// --- META DIÁRIA ---
+function initDailyGoal() {
+    const today = new Date().toLocaleDateString();
+    if (DAILY_GOAL.date !== today) {
+        DAILY_GOAL = {
+            date: today,
+            count: 0,
+            target: 20
         };
-    });
+        localStorage.setItem('BD_DAILY_GOAL', JSON.stringify(DAILY_GOAL));
+    }
+    updateDailyGoalUI();
+}
 
-    if (correctIndex === -1) {
-        showToast('Marque uma opção como a correta.', 'danger');
-        return;
+function updateDailyGoal(increment = 1) {
+    const today = new Date().toLocaleDateString();
+    if (DAILY_GOAL.date !== today) {
+        DAILY_GOAL.count = 0;
+        DAILY_GOAL.date = today;
+    }
+    DAILY_GOAL.count += increment;
+    localStorage.setItem('BD_DAILY_GOAL', JSON.stringify(DAILY_GOAL));
+    updateDailyGoalUI();
+    if (DAILY_GOAL.count === DAILY_GOAL.target) showToast("🎉 Parabéns! Meta diária batida!", "success");
+}
+
+function updateDailyGoalUI() {
+    const goalBarFill = document.getElementById('goalBarFill');
+    const goalText = document.getElementById('goalText');
+    if (!goalBarFill || !goalText) return;
+    const perc = Math.min((DAILY_GOAL.count / DAILY_GOAL.target) * 100, 100);
+    goalBarFill.style.width = `${perc}%`;
+    goalText.textContent = `${DAILY_GOAL.count}/${DAILY_GOAL.target}`;
+    const dailyGoalPanel = document.getElementById('dailyGoalPanel');
+    if (perc >= 100) {
+        if (dailyGoalPanel) dailyGoalPanel.classList.add('goal-reached');
+    } else {
+        if (dailyGoalPanel) dailyGoalPanel.classList.remove('goal-reached');
+    }
+}
+
+/* ---------------------------
+   Questões (CRUD e Imagem)
+----------------------------*/
+function saveQuestion(e) {
+    e.preventDefault();
+    const id = document.getElementById('qid').value;
+    const novaQuestao = {
+        assunto: document.getElementById('assunto').value.trim(),
+        topico: document.getElementById('topico').value.trim(),
+        enunciado: document.getElementById('enunciado').value.trim(),
+        A: document.getElementById('optA').value.trim(),
+        B: document.getElementById('optB').value.trim(),
+        C: document.getElementById('optC').value.trim(),
+        D: document.getElementById('optD').value.trim(),
+        E: document.getElementById('optE').value.trim(),
+        correta: document.getElementById('correta').value,
+        resolucao: document.getElementById('resolucao').value.trim(),
+        tags: document.getElementById('tags').value.toLowerCase().trim(),
+        ano: document.getElementById('ano').value.trim(),
+        banca: document.getElementById('banca').value.trim(),
+        disciplina: document.getElementById('disciplina').value.trim(),
+        dificuldade: document.getElementById('dificuldade') ? document.getElementById('dificuldade').value : "",
+        imagem: null
+    };
+    const currentImg = document.getElementById('imgPreview').src;
+    if (document.getElementById('imgPreview').style.display !== 'none') {
+        novaQuestao.imagem = currentImg;
     }
 
-    const newQuestion = {
-        id: id || crypto.randomUUID(),
-        disciplina: disciplina,
-        enunciado: enunciado,
-        opcoes: opcoes,
-        resolucao: resolucao,
-        tags: tags,
-        dataCriacao: id ? appState.quizData.find(q => q.id === id).dataCriacao : new Date().toISOString(),
-        ultimaRevisao: new Date().toISOString(),
-        acertosConsecutivos: id ? (appState.quizData.find(q => q.id === id).acertosConsecutivos || 0) : 0
-    };
+    if (!novaQuestao.enunciado || !novaQuestao.correta || !novaQuestao.assunto) {
+        showToast("Preencha Enunciado, Assunto e Resposta.", "error");
+        return;
+    }
 
     if (id) {
-        // Edição
-        const index = appState.quizData.findIndex(q => q.id === id);
+        const index = BD.findIndex(q => q.id == id);
         if (index !== -1) {
-            appState.quizData[index] = newQuestion;
-            showToast('Pergunta editada com sucesso!', 'success');
+            BD[index] = {
+                ...BD[index],
+                ...novaQuestao,
+                stats: BD[index].stats || {
+                    correct: 0,
+                    wrong: 0
+                },
+                revisao: BD[index].revisao || false
+            };
         }
     } else {
-        // Nova pergunta
-        appState.quizData.push(newQuestion);
-        appState.totalQuestions++;
-        showToast('Pergunta adicionada com sucesso!', 'success');
+        novaQuestao.id = Date.now();
+        novaQuestao.stats = {
+            correct: 0,
+            wrong: 0
+        };
+        novaQuestao.revisao = false;
+        BD.push(novaQuestao);
+        questionsSinceBackup++;
+        if (questionsSinceBackup >= 20) {
+            alert("Lembrete: Faça backup clicando em Exportar!");
+            questionsSinceBackup = 0;
+        }
     }
-
-    saveState();
-    renderQuizInterface();
+    saveBD();
+    showToast("Salvo!", "success");
+    fecharFormulario();
+    updateFilterOptions();
+    renderQuestions();
 }
 
-/**
- * Filtra a lista de perguntas por tag.
- * @param {string} tag - A tag para filtrar.
- */
-function filterByTag(tag) {
-    appState.filterTag = tag || null;
-    document.getElementById('tagFilter').value = tag || '';
-    renderQuizList();
-}
-
-/**
- * Renderiza a lista de perguntas na interface do gerenciador.
- */
-function renderQuizList() {
-    const container = document.getElementById('quizListContainer');
-    const paginationControls = document.getElementById('paginationControls');
-    if (!container || !paginationControls) return;
-
-    // Filtra as perguntas
-    const filteredQuestions = appState.quizData.filter(q =>
-        !appState.filterTag || (q.tags && q.tags.includes(appState.filterTag.toLowerCase()))
-    );
-
-    const itemsPerPage = 10;
-    const totalPages = Math.ceil(filteredQuestions.length / itemsPerPage);
-    let currentPage = parseInt(container.dataset.currentPage) || 1;
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-
-    container.dataset.currentPage = currentPage;
-
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
-    const paginatedQuestions = filteredQuestions.slice(start, end);
-
-    let html = '';
-    if (filteredQuestions.length === 0) {
-        html = '<p class="empty-state">Nenhuma pergunta encontrada. Adicione uma nova ou ajuste o filtro.</p>';
-    } else {
-        html = paginatedQuestions.map(q => {
-            const isRevisao = q.acertosConsecutivos < 3;
-            const statusClass = isRevisao ? 'revisao-tag' : 'dominada-tag';
-            const statusText = isRevisao ? 'REVISAR' : 'DOMINADA';
-
-            return `
-                <div class="list-item question-item card">
-                    <div class="item-header">
-                        <span class="disciplina-tag" style="background-color: ${stringToColor(q.disciplina)};">${q.disciplina}</span>
-                        <span class="status-tag ${statusClass}">${statusText} (${q.acertosConsecutivos || 0})</span>
-                    </div>
-                    <p class="item-content">${q.enunciado.substring(0, 150)}...</p>
-                    <div class="item-tags">
-                        ${(q.tags || []).map(tag => `<span class="tag">${tag}</span>`).join('')}
-                    </div>
-                    <div class="item-actions">
-                        <button class="btn info small" onclick="editQ('${q.id}')">
-                            <i class="fas fa-edit"></i> Editar
-                        </button>
-                        <button class="btn danger small" onclick="delQ('${q.id}')">
-                            <i class="fas fa-trash-alt"></i> Excluir
-                        </button>
-                        <button class="btn secondary small" onclick="copyQuestion('${q.id}')">
-                            <i class="fas fa-copy"></i> Copiar
-                        </button>
-                        <button class="btn warning small" onclick="toggleRevisao('${q.id}', ${isRevisao})">
-                            <i class="fas fa-sync-alt"></i> ${isRevisao ? 'Marcar como Dominada' : 'Voltar para Revisão'}
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
+function clearForm() {
+    const form = document.getElementById('form');
+    if (form) form.reset();
+    document.getElementById('qid').value = '';
+    const imgPreview = document.getElementById('imgPreview');
+    const btnRemoverImg = document.getElementById('btnRemoverImg');
+    if (imgPreview) {
+        imgPreview.src = '';
+        imgPreview.style.display = 'none';
     }
-
-    container.innerHTML = html;
-
-    // Renderiza controles de paginação
-    paginationControls.innerHTML = `
-        <button class="btn secondary" onclick="changePage(${currentPage - 1}, ${totalPages}, 'quizListContainer')" ${currentPage <= 1 ? 'disabled' : ''}>
-            <i class="fas fa-chevron-left"></i> Anterior
-        </button>
-        <span>Página ${currentPage} de ${totalPages} (${filteredQuestions.length} questões)</span>
-        <button class="btn secondary" onclick="changePage(${currentPage + 1}, ${totalPages}, 'quizListContainer')" ${currentPage >= totalPages ? 'disabled' : ''}>
-            Próxima <i class="fas fa-chevron-right"></i>
-        </button>
-    `;
+    if (btnRemoverImg) btnRemoverImg.style.display = 'none';
 }
 
-/**
- * Altera a página da lista.
- * @param {number} newPage - O novo número da página.
- * @param {number} totalPages - Total de páginas.
- * @param {string} containerId - ID do container para armazenar o estado da página.
- */
-function changePage(newPage, totalPages, containerId) {
-    if (newPage >= 1 && newPage <= totalPages) {
-        document.getElementById(containerId).dataset.currentPage = newPage;
-        renderQuizList(); // Re-renderiza a lista de perguntas
-    }
-}
-
-/**
- * Edita uma pergunta.
- * @param {string} id - ID da pergunta.
- */
 function editQ(id) {
-    const question = appState.quizData.find(q => q.id === id);
-    if (question) {
-        renderAddQuestionForm(question);
+    const q = BD.find(x => x.id == id);
+    if (!q) return;
+
+    switchModule('questoes');
+
+    abrirFormulario();
+
+    document.getElementById('qid').value = q.id;
+    document.getElementById('assunto').value = q.assunto;
+    document.getElementById('topico').value = q.topico;
+    document.getElementById('enunciado').value = q.enunciado;
+    document.getElementById('optA').value = q.A;
+    document.getElementById('optB').value = q.B;
+    document.getElementById('optC').value = q.C;
+    document.getElementById('optD').value = q.D;
+    document.getElementById('optE').value = q.E;
+    document.getElementById('correta').value = q.correta;
+    document.getElementById('resolucao').value = q.resolucao;
+    document.getElementById('tags').value = q.tags;
+    document.getElementById('ano').value = q.ano;
+    document.getElementById('banca').value = q.banca;
+    document.getElementById('disciplina').value = q.disciplina;
+    if (document.getElementById('dificuldade')) document.getElementById('dificuldade').value = q.dificuldade || "";
+
+    if (q.imagem) {
+        const imgPreview = document.getElementById('imgPreview');
+        const btnRemoverImg = document.getElementById('btnRemoverImg');
+        if (imgPreview) {
+            imgPreview.src = q.imagem;
+            imgPreview.style.display = 'block';
+        }
+        if (btnRemoverImg) btnRemoverImg.style.display = 'inline-block';
+    } else {
+        const imgPreview = document.getElementById('imgPreview');
+        const btnRemoverImg = document.getElementById('btnRemoverImg');
+        if (imgPreview) imgPreview.style.display = 'none';
+        if (btnRemoverImg) btnRemoverImg.style.display = 'none';
     }
 }
 
-/**
- * Exclui uma pergunta.
- * @param {string} id - ID da pergunta.
- */
 function delQ(id) {
-    if (confirmAction('Tem certeza que deseja excluir esta pergunta?')) {
-        appState.quizData = appState.quizData.filter(q => q.id !== id);
-        appState.totalQuestions = appState.quizData.length;
-        saveState();
-        showToast('Pergunta excluída.', 'success');
-        renderQuizInterface();
+    if (!confirm('Excluir?')) return;
+    BD = BD.filter(q => q.id != id);
+    saveBD();
+    showToast("Excluída.", "info");
+    renderQuestions();
+    updateFilterOptions();
+}
+
+function toggleRevisao(id, isQuiz = false) {
+    const index = BD.findIndex(q => q.id == id);
+    if (index !== -1) {
+        BD[index].revisao = !BD[index].revisao;
+        saveBD();
+
+        if (isQuiz) {
+            const btn = document.getElementById(`btnQuizRev-${id}`);
+            if (btn) btn.classList.toggle('active');
+        } else {
+            renderQuestions();
+        }
     }
 }
 
-/**
- * Copia o enunciado e a resolução da pergunta para o clipboard.
- * @param {string} id - ID da pergunta.
- */
 function copyQuestion(id) {
-    const question = appState.quizData.find(q => q.id === id);
-    if (question) {
-        const textToCopy = `Disciplina: ${question.disciplina}\n\nPergunta: ${question.enunciado}\n\nResolução: ${question.resolucao}`;
-        // Não podemos usar navigator.clipboard.writeText devido a restrições de iframe, usamos a alternativa.
-        try {
-            const textarea = document.createElement('textarea');
-            textarea.value = textToCopy;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            showToast('Pergunta copiada para a área de transferência!', 'info');
-        } catch (err) {
-            showToast('Não foi possível copiar o texto automaticamente.', 'warning');
-            console.error('Erro ao copiar:', err);
+    const q = BD.find(x => x.id == id);
+    if (!q) return;
+    const text = `${q.enunciado}\n\nA) ${q.A}\nB) ${q.B}\nC) ${q.C}\nD) ${q.D}\nE) ${q.E}\n\nResp: ${q.correta}`;
+    navigator.clipboard.writeText(text).then(() => showToast('Copiado!', 'success'));
+}
+
+/* ---------------------------
+   FUNÇÕES PARA BOTÕES DE AÇÃO RÁPIDA
+----------------------------*/
+
+function abrirFormularioQuestaoRapido() {
+    switchModule('questoes');
+
+    setTimeout(() => {
+        abrirFormulario();
+
+        const formCard = document.getElementById('formCard');
+        if (formCard) {
+            formCard.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+            // Adiciona highlight
+            formCard.classList.add('form-highlight');
+            setTimeout(() => formCard.classList.remove('form-highlight'), 2000);
         }
-    }
+    }, 100);
 }
 
-/**
- * Alterna o estado de revisão de uma pergunta.
- * @param {string} id - ID da pergunta.
- * @param {boolean} currentlyInRevisao - Se a pergunta está atualmente em revisão.
- */
-function toggleRevisao(id, currentlyInRevisao) {
-    const question = appState.quizData.find(q => q.id === id);
-    if (question) {
-        if (currentlyInRevisao) {
-            // Marcar como Dominada (acertos suficientes para sair da revisão)
-            question.acertosConsecutivos = 3;
-            showToast('Pergunta marcada como Dominada!', 'success');
-        } else {
-            // Voltar para Revisão
-            question.acertosConsecutivos = 0;
-            showToast('Pergunta marcada para Revisão!', 'warning');
+function abrirFormularioFlashcardRapido() {
+    switchModule('flashcards');
+
+    setTimeout(() => {
+        openFCForm();
+
+        const formCardFC = document.getElementById('formCardFC');
+        if (formCardFC) {
+            formCardFC.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+            // Adiciona highlight
+            formCardFC.classList.add('form-highlight');
+            setTimeout(() => formCardFC.classList.remove('form-highlight'), 2000);
         }
-        question.ultimaRevisao = new Date().toISOString();
-        saveState();
-        renderQuizInterface();
+    }, 100);
+}
+
+function iniciarTreinoRapido() {
+    switchModule('questoes');
+    setTimeout(() => {
+        initQuiz();
+    }, 100);
+}
+
+function verCronogramaRapido() {
+    switchModule('cronograma');
+}
+
+/* ---------------------------
+   Sistema de Tags Clicáveis
+----------------------------*/
+function filterByTag(tagName) {
+    // Limpa outros filtros e define a tag no campo de busca
+    const fSearch = document.getElementById('fSearch');
+    if (fSearch) {
+        fSearch.value = tagName;
+
+        // Limpa outros filtros para focar apenas na tag
+        clearOtherFilters();
+
+        renderQuestions();
+        showToast(`Filtrando por tag: ${tagName}`, 'info');
     }
 }
 
-// --- MÓDULO TREINO (QUIZ) ---
+function clearOtherFilters() {
+    // Limpa filtros exceto o de busca
+    const fDisciplina = document.getElementById('fDisciplina');
+    const fAssunto = document.getElementById('fAssunto');
+    const fBanca = document.getElementById('fBanca');
+    const fAno = document.getElementById('fAno');
+    const fDificuldade = document.getElementById('fDificuldade');
+    const fRevisao = document.getElementById('fRevisao');
 
-/**
- * Inicializa um novo treino/quiz.
- */
-function initQuiz() {
-    // 1. Define o modo (Normal ou Revisão)
-    const allQuestions = appState.quizData;
-    const revisaoQuestions = allQuestions.filter(q => (q.acertosConsecutivos || 0) < 3);
+    if (fDisciplina) fDisciplina.value = "";
+    if (fAssunto) fAssunto.value = "";
+    if (fBanca) fBanca.value = "";
+    if (fAno) fAno.value = "";
+    if (fDificuldade) fDificuldade.value = "";
+    if (fRevisao) fRevisao.checked = false;
 
-    // Se houver perguntas de revisão, prioriza elas (70% de chance)
-    if (revisaoQuestions.length > 0 && Math.random() < 0.7) {
-        appState.quizData = revisaoQuestions.sort(() => 0.5 - Math.random());
-        appState.quizMode = 'revisao';
-        showToast(`Iniciando Treino de Revisão com ${revisaoQuestions.length} perguntas!`, 'warning');
-    } else if (allQuestions.length > 0) {
-        // Senão, pega um conjunto aleatório de 10 perguntas, incluindo as de revisão, para treino normal
-        const totalSample = 10;
-        const sampleSize = Math.min(totalSample, allQuestions.length);
+    // Atualiza os filtros cascata
+    updateFilterOptions();
+}
 
-        // Embaralha todas as perguntas
-        const shuffled = allQuestions.sort(() => 0.5 - Math.random());
-        // Pega as primeiras do embaralhamento
-        appState.quizData = shuffled.slice(0, sampleSize);
-        appState.quizMode = 'normal';
-        showToast(`Iniciando Treino Normal com ${appState.quizData.length} perguntas.`, 'info');
-    } else {
-        showToast('Nenhuma pergunta cadastrada para iniciar o treino!', 'danger');
-        return;
+function abrirFormulario() {
+    clearForm();
+    const formContainer = document.getElementById('formCard');
+    const formCardFC = document.getElementById('formCardFC');
+    if (formContainer) formContainer.style.display = 'block';
+    if (formContainer) formContainer.scrollIntoView();
+    if (formCardFC) formCardFC.style.display = 'none';
+}
+
+function fecharFormulario() {
+    const formContainer = document.getElementById('formCard');
+    if (formContainer) formContainer.style.display = 'none';
+    clearForm();
+}
+
+/* ---------------------------
+   FILTROS CASCATA (Universal)
+----------------------------*/
+// Configuração dos filtros de QUESTÕES que participarão da cascata
+const questionFiltersConfig = [{
+        el: document.getElementById('fDisciplina'),
+        prop: 'disciplina',
+        label: "Todas as disciplinas"
+    },
+    {
+        el: document.getElementById('fAssunto'),
+        prop: 'assunto',
+        label: "Todos os assuntos"
+    },
+    {
+        el: document.getElementById('fBanca'),
+        prop: 'banca',
+        label: "Todas as bancas"
+    },
+    {
+        el: document.getElementById('fAno'),
+        prop: 'ano',
+        label: "Todos os anos"
+    },
+    {
+        el: document.getElementById('fDificuldade'),
+        prop: 'dificuldade',
+        label: "Dificuldade"
     }
+];
 
-    appState.currentQuiz = 0;
-    appState.currentModule = 'quiz';
-    renderQuizInterface(); // Chama para mudar o módulo
-    renderQuizQuestion(); // Renderiza a primeira pergunta
-}
+function updateFilterOptions() {
+    // 1. Captura o estado atual de todos os selects + checkbox de revisão
+    const activeStates = {};
+    questionFiltersConfig.forEach(cfg => {
+        if (cfg.el) activeStates[cfg.prop] = cfg.el.value;
+    });
+    const fRevisao = document.getElementById('fRevisao');
+    const isRevisao = fRevisao ? fRevisao.checked : false;
 
-/**
- * Renderiza a pergunta atual do quiz.
- */
-function renderQuizQuestion() {
-    if (appState.currentQuiz === null || appState.currentQuiz >= appState.quizData.length) {
-        renderQuizEnd();
-        return;
-    }
+    // 2. Para CADA filtro, recalcula suas opções disponíveis
+    questionFiltersConfig.forEach(target => {
+        if (!target.el) return;
 
-    headerTitle.textContent = `Treino (${appState.currentQuiz + 1}/${appState.quizData.length})`;
-    const question = appState.quizData[appState.currentQuiz];
+        // Conjunto para guardar opções únicas encontradas
+        const availableOptions = new Set();
 
-    let optionsHtml = question.opcoes.map((opt, index) => `
-        <button class="quiz-option" id="option-${index}" onclick="checarResposta(${index})">${String.fromCharCode(65 + index)}. ${opt.texto}</button>
-    `).join('');
+        // 3. Varre o Banco de Dados
+        BD.forEach(q => {
+            // A regra de Revisão é absoluta (se marcada, só mostra o que é revisão)
+            if (isRevisao && !q.revisao) return;
 
-    mainContent.innerHTML = `
-        <section class="module-quiz-active">
-            <div class="card quiz-card">
-                <div class="quiz-header">
-                    <span class="disciplina-tag" style="background-color: ${stringToColor(question.disciplina)};">${question.disciplina}</span>
-                    <span class="status-tag ${question.acertosConsecutivos < 3 ? 'revisao-tag' : 'dominada-tag'}">
-                        Status: ${question.acertosConsecutivos < 3 ? 'Revisão' : 'Dominada'} (${question.acertosConsecutivos || 0})
-                    </span>
-                </div>
-                <h3 class="quiz-question">${question.enunciado}</h3>
+            // Verifica se a questão passa por TODOS os filtros, EXCETO o filtro alvo (target)
+            let match = true;
+            for (const cfg of questionFiltersConfig) {
+                if (cfg.prop === target.prop) continue; // Ignora o próprio campo para não restringir a si mesmo
 
-                <div class="quiz-options-container" id="quizOptionsContainer">
-                    ${optionsHtml}
-                </div>
+                const filterVal = activeStates[cfg.prop];
+                // Se filtro tem valor e a questão não bate
+                if (filterVal && String(q[cfg.prop] || '') !== filterVal) {
+                    match = false;
+                    break;
+                }
+            }
 
-                <div id="quizFeedback" class="quiz-feedback-box" style="display: none;">
-                    <!-- Feedback e resolução aparecem aqui -->
-                </div>
-            </div>
-
-            <div class="quiz-controls-active">
-                <button id="btnPular" class="btn secondary" onclick="pularPergunta()">
-                    <i class="fas fa-forward"></i> Pular
-                </button>
-                <button id="btnExit" class="btn danger" onclick="sairTreino()">
-                    <i class="fas fa-times"></i> Sair do Treino
-                </button>
-            </div>
-        </section>
-    `;
-}
-
-/**
- * Checa a resposta do usuário.
- * @param {number} selectedIndex - Índice da opção selecionada.
- */
-function checarResposta(selectedIndex) {
-    const question = appState.quizData[appState.currentQuiz];
-    const optionsContainer = document.getElementById('quizOptionsContainer');
-    const feedbackBox = document.getElementById('quizFeedback');
-    const selectedOptionButton = document.getElementById(`option-${selectedIndex}`);
-    const isCorrect = question.opcoes[selectedIndex].correta;
-
-    // Desabilita as opções após a escolha
-    Array.from(optionsContainer.children).forEach(btn => btn.disabled = true);
-
-    // Atualiza o feedback e o estilo dos botões
-    if (isCorrect) {
-        selectedOptionButton.classList.add('correct-answer');
-        feedbackBox.innerHTML = '<p class="success-message"><i class="fas fa-check-circle"></i> Resposta Correta! Parabéns.</p>';
-        updateStats(question, true);
-        incrementDailyProgress();
-    } else {
-        selectedOptionButton.classList.add('wrong-answer');
-        const correctIndex = question.opcoes.findIndex(opt => opt.correta);
-        document.getElementById(`option-${correctIndex}`).classList.add('correct-answer-highlight');
-        feedbackBox.innerHTML = '<p class="danger-message"><i class="fas fa-times-circle"></i> Resposta Incorreta. Revise a explicação.</p>';
-        updateStats(question, false);
-    }
-
-    feedbackBox.style.display = 'block';
-
-    // Adiciona o botão de resolução e próxima
-    feedbackBox.innerHTML += `
-        <button class="btn info small" id="btnMostrarResolucao" onclick="mostrarResolucao('${question.id}')">
-            <i class="fas fa-book-open"></i> Ver Resolução
-        </button>
-        <button class="btn primary small" onclick="proximaPergunta()">
-            <i class="fas fa-arrow-right"></i> Próxima Pergunta
-        </button>
-    `;
-}
-
-/**
- * Exibe a resolução/explicação da pergunta.
- * @param {string} id - ID da pergunta.
- */
-function mostrarResolucao(id) {
-    const question = appState.quizData.find(q => q.id === id);
-    const feedbackBox = document.getElementById('quizFeedback');
-    if (feedbackBox && question) {
-        let resolucaoHtml = `
-            <div class="resolution-content">
-                <h4>Resolução/Explicação:</h4>
-                <p>${question.resolucao || 'Nenhuma resolução fornecida.'}</p>
-            </div>
-        `;
-        // Evita duplicar a resolução se já foi exibida
-        if (!feedbackBox.querySelector('.resolution-content')) {
-            feedbackBox.insertAdjacentHTML('beforeend', resolucaoHtml);
-            document.getElementById('btnMostrarResolucao').style.display = 'none';
-        }
-    }
-}
-
-/**
- * Avança para a próxima pergunta.
- */
-function proximaPergunta() {
-    appState.currentQuiz++;
-    renderQuizQuestion();
-}
-
-/**
- * Pula a pergunta atual (conta como erro, mas não conta como tentativa).
- */
-function pularPergunta() {
-    if (confirmAction('Tem certeza que deseja pular esta pergunta?')) {
-        // Conta como erro, mas sem afetar o progresso diário de acertos
-        // Apenas para fins de contagem de acertos consecutivos (para forçar revisão)
-        updateStats(appState.quizData[appState.currentQuiz], false, true);
-        proximaPergunta();
-    }
-}
-
-/**
- * Finaliza o treino.
- */
-function sairTreino() {
-    if (confirmAction('Tem certeza que deseja finalizar o treino?')) {
-        appState.currentQuiz = null;
-        switchModule('home');
-    }
-}
-
-/**
- * Renderiza a tela de fim de quiz.
- */
-function renderQuizEnd() {
-    headerTitle.textContent = 'Treino Finalizado!';
-    const total = appState.quizData.length;
-    const correctCount = appState.quizData.filter(q => q.acertoSessao).length;
-    const percentage = total > 0 ? (correctCount / total * 100).toFixed(1) : 0;
-
-    mainContent.innerHTML = `
-        <section class="module-quiz-end">
-            <div class="card end-summary">
-                <h2>Parabéns! Você concluiu o treino.</h2>
-                <div class="result-stats">
-                    <p class="stat-item success"><i class="fas fa-check-circle"></i> Acertos: <span>${correctCount}</span></p>
-                    <p class="stat-item danger"><i class="fas fa-times-circle"></i> Erros: <span>${total - correctCount}</span></p>
-                    <p class="stat-item primary"><i class="fas fa-percent"></i> Taxa de Acerto: <span>${percentage}%</span></p>
-                    <p class="stat-item info"><i class="fas fa-layer-group"></i> Total de Perguntas: <span>${total}</span></p>
-                </div>
-            </div>
-
-            <div class="end-actions">
-                <button class="btn primary large" onclick="initQuiz()">
-                    <i class="fas fa-redo"></i> Novo Treino
-                </button>
-                <button class="btn secondary large" onclick="switchModule('home')">
-                    <i class="fas fa-home"></i> Voltar para o Início
-                </button>
-            </div>
-        </section>
-    `;
-
-    appState.currentQuiz = null; // Finaliza o estado do quiz
-    saveState();
-}
-
-// --- GESTÃO DE ESTATÍSTICAS ---
-
-/**
- * Atualiza as estatísticas de acertos/erros.
- * @param {object} question - A pergunta respondida.
- * @param {boolean} isCorrect - Se a resposta foi correta.
- * @param {boolean} isSkipped - Se a pergunta foi pulada (não conta como tentativa normal).
- */
-function updateStats(question, isCorrect, isSkipped = false) {
-    const disciplina = question.disciplina || 'Geral';
-    const tags = question.tags || ['geral'];
-
-    // 1. Atualiza acertos consecutivos no objeto original da pergunta (para controle de revisão)
-    const originalQuestion = appState.quizData.find(q => q.id === question.id);
-    if (originalQuestion) {
-        if (isCorrect) {
-            originalQuestion.acertosConsecutivos = (originalQuestion.acertosConsecutivos || 0) + 1;
-            originalQuestion.ultimaRevisao = new Date().toISOString();
-        } else {
-            // Se errou ou pulou, volta para 0
-            originalQuestion.acertosConsecutivos = 0;
-            originalQuestion.ultimaRevisao = new Date().toISOString();
-        }
-    }
-
-    // Marca o acerto na sessão para o relatório final
-    question.acertoSessao = isCorrect;
-
-    if (!isSkipped) {
-        // 2. Atualiza estatísticas globais (só se não for pulada)
-        appState.stats.totalAttempted++;
-        if (isCorrect) {
-            appState.stats.totalCorrect++;
-        }
-
-        // 3. Estatísticas por Disciplina
-        appState.stats.attemptedByDisciplina[disciplina] = (appState.stats.attemptedByDisciplina[disciplina] || 0) + 1;
-        if (isCorrect) {
-            appState.stats.correctByDisciplina[disciplina] = (appState.stats.correctByDisciplina[disciplina] || 0) + 1;
-        }
-
-        // 4. Estatísticas por Tag
-        tags.forEach(tag => {
-            appState.stats.attemptedByTag[tag] = (appState.stats.attemptedByTag[tag] || 0) + 1;
-            if (isCorrect) {
-                appState.stats.correctByTag[tag] = (appState.stats.correctByTag[tag] || 0) + 1;
+            // Se a questão é válida no contexto dos outros filtros, adiciona a opção deste campo
+            if (match) {
+                const val = q[target.prop];
+                if (val) availableOptions.add(String(val));
             }
         });
-    }
 
-    saveState();
-}
+        // 4. Ordena e Renderiza
+        let optionsArray = [...availableOptions].sort();
+        if (target.prop === 'ano') optionsArray.sort((a, b) => b - a); // Ano descrescente
 
-/**
- * Calcula a taxa de acerto.
- * @param {number} correct - Número de acertos.
- * @param {number} attempted - Número de tentativas.
- * @returns {string} - Taxa de acerto formatada.
- */
-function calculateRate(correct, attempted) {
-    if (attempted === 0) return '0.0%';
-    return ((correct / attempted) * 100).toFixed(1) + '%';
-}
-
-/**
- * Renderiza o conteúdo do modal de estatísticas.
- */
-function renderStatsModal() {
-    const body = document.getElementById('statsBodyModal');
-    if (!body) return;
-
-    // Estatísticas Globais
-    const totalCorrect = appState.stats.totalCorrect;
-    const totalAttempted = appState.stats.totalAttempted;
-    const overallRate = calculateRate(totalCorrect, totalAttempted);
-
-    let globalHtml = `
-        <div class="stats-section">
-            <h3>Visão Geral</h3>
-            <div class="stats-summary-grid">
-                <div class="stat-box">
-                    <h4>Total de Acertos</h4>
-                    <p class="success">${totalCorrect}</p>
-                </div>
-                <div class="stat-box">
-                    <h4>Total de Tentativas</h4>
-                    <p class="primary">${totalAttempted}</p>
-                </div>
-                <div class="stat-box">
-                    <h4>Taxa Global de Acerto</h4>
-                    <p class="accent">${overallRate}</p>
-                </div>
-                <div class="stat-box">
-                    <h4>Meta Diária</h4>
-                    <p class="info">${appState.dailyGoal} perguntas</p>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Estatísticas por Disciplina
-    let disciplinaHtml = '<h3>Taxa de Acerto por Disciplina</h3>';
-    const disciplinas = Object.keys(appState.stats.attemptedByDisciplina);
-
-    if (disciplinas.length > 0) {
-        disciplinaHtml += '<ul class="stats-list">';
-        disciplinas.forEach(disciplina => {
-            const correct = appState.stats.correctByDisciplina[disciplina] || 0;
-            const attempted = appState.stats.attemptedByDisciplina[disciplina] || 0;
-            const rate = calculateRate(correct, attempted);
-
-            disciplinaHtml += `
-                <li class="stats-item">
-                    <span class="disciplina-tag" style="background-color: ${stringToColor(disciplina)};">${disciplina}</span>
-                    <span>Acertos: ${correct} / ${attempted}</span>
-                    <span class="rate-display">${rate}</span>
-                </li>
-            `;
-        });
-        disciplinaHtml += '</ul>';
-    } else {
-        disciplinaHtml += '<p class="text-muted">Comece a responder perguntas para ver as estatísticas por disciplina.</p>';
-    }
-
-    // Estatísticas por Tag
-    let tagHtml = '<h3>Taxa de Acerto por Tag</h3>';
-    const tags = Object.keys(appState.stats.attemptedByTag);
-
-    if (tags.length > 0) {
-        tagHtml += '<ul class="stats-list tag-stats-list">';
-        tags.forEach(tag => {
-            const correct = appState.stats.correctByTag[tag] || 0;
-            const attempted = appState.stats.attemptedByTag[tag] || 0;
-            const rate = calculateRate(correct, attempted);
-
-            tagHtml += `
-                <li class="stats-item">
-                    <span class="tag">${tag}</span>
-                    <span>Acertos: ${correct} / ${attempted}</span>
-                    <span class="rate-display">${rate}</span>
-                </li>
-            `;
-        });
-        tagHtml += '</ul>';
-    } else {
-        tagHtml += '<p class="text-muted">Adicione tags às suas perguntas para rastrear o desempenho por tópico.</p>';
-    }
-
-    body.innerHTML = globalHtml + '<div class="stats-section">' + disciplinaHtml + '</div>' + '<div class="stats-section">' + tagHtml + '</div>';
-
-    // Adiciona evento para fechar o modal
-    document.getElementById('btnCloseStats').onclick = () => document.getElementById('statsModal').close();
-}
-
-// --- MÓDULO FLASHCARDS ---
-
-/**
- * Renderiza a interface do gerenciador de flashcards.
- */
-function renderFlashcardsModule() {
-    headerTitle.textContent = 'Gerenciador de Flashcards';
-
-    const tags = getUniqueTags(appState.flashcardData.concat(appState.quizData));
-    const tagOptions = tags.map(tag => `<option value="${tag}">${tag}</option>`).join('');
-
-    mainContent.innerHTML = `
-        <section class="module-flashcards">
-            <div class="controls-bar">
-                <button class="btn primary" onclick="renderAddFlashcardForm()">
-                    <i class="fas fa-plus-circle"></i> Adicionar Flashcard
-                </button>
-                <button class="btn accent" onclick="startFlashcardStudy()">
-                    <i class="fas fa-pencil-alt"></i> Iniciar Estudo
-                </button>
-                <div class="filter-group">
-                    <select id="tagFilterFc" onchange="filterFcByTag(this.value)">
-                        <option value="">Filtrar por Tag (Todos)</option>
-                        ${tagOptions}
-                    </select>
-                </div>
-            </div>
-
-            <div id="flashcardListContainer" class="list-container">
-                <!-- Lista de flashcards será renderizada aqui -->
-            </div>
-             <div id="paginationControlsFc" class="pagination-controls">
-                <!-- Controles de paginação aqui -->
-            </div>
-        </section>
-    `;
-
-    renderFlashcardList();
-}
-
-/**
- * Renderiza o formulário de adição/edição de flashcard.
- * @param {object} [card] - Flashcard a ser editado (opcional).
- */
-function renderAddFlashcardForm(card = null) {
-    headerTitle.textContent = card ? 'Editar Flashcard' : 'Adicionar Novo Flashcard';
-
-    const isEdit = !!card;
-    const tags = getUniqueTags(appState.flashcardData.concat(appState.quizData));
-    const currentTags = card ? (card.tags || []).join(', ') : '';
-
-    mainContent.innerHTML = `
-        <section class="module-form">
-            <h2 class="section-title">${isEdit ? 'Editar Flashcard' : 'Adicionar Flashcard'}</h2>
-
-            <form id="flashcardForm" class="data-form">
-                <div class="form-group">
-                    <label for="frente">Frente (Pergunta/Conceito):</label>
-                    <textarea id="frente" rows="3" required>${card ? card.frente : ''}</textarea>
-                </div>
-                <div class="form-group">
-                    <label for="verso">Verso (Resposta/Definição):</label>
-                    <textarea id="verso" rows="4" required>${card ? card.verso : ''}</textarea>
-                </div>
-                 <div class="form-group">
-                    <label for="disciplina_fc">Disciplina/Matéria:</label>
-                    <input type="text" id="disciplina_fc" value="${card ? (card.disciplina || '') : ''}" required>
-                </div>
-                <div class="form-group">
-                    <label for="tags_fc">Tags (Separadas por vírgula):</label>
-                    <input type="text" id="tags_fc" value="${currentTags}">
-                    <div class="tag-suggestions" id="tagSuggestionsFc">
-                        ${tags.map(tag => `<span class="tag suggestion-tag" onclick="selectTagFc('${tag}')">${tag}</span>`).join('')}
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn primary">
-                        ${isEdit ? '<i class="fas fa-save"></i> Salvar Edição' : '<i class="fas fa-plus-circle"></i> Adicionar'}
-                    </button>
-                    <button type="button" class="btn secondary" onclick="renderFlashcardsModule()">
-                        <i class="fas fa-times-circle"></i> Cancelar
-                    </button>
-                </div>
-            </form>
-        </section>
-    `;
-
-    document.getElementById('flashcardForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        saveFlashcard(card ? card.id : null);
+        renderSelectOptions(target.el, target.label, optionsArray, activeStates[target.prop]);
     });
 }
 
-/**
- * Salva um novo flashcard ou edita um existente.
- * @param {string} [id] - ID do flashcard a ser editado (opcional).
- */
-function saveFlashcard(id = null) {
-    const frente = document.getElementById('frente').value.trim();
-    const verso = document.getElementById('verso').value.trim();
-    const disciplina = document.getElementById('disciplina_fc').value.trim();
-    const tagsInput = document.getElementById('tags_fc').value;
-    const tags = tagsInput.split(',').map(tag => tag.trim().toLowerCase()).filter(tag => tag);
+function renderSelectOptions(selectEl, defaultText, optionsArray, currentValue) {
+    // Guarda o valor atual para tentar restaurar após re-render
+    const val = currentValue || selectEl.value;
+    selectEl.innerHTML = `<option value="">${defaultText}</option>` +
+        optionsArray.map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('');
+
+    // Tenta restaurar a seleção anterior se ela ainda existir nas novas opções
+    if (val && optionsArray.includes(val)) {
+        selectEl.value = val;
+    } else {
+        selectEl.value = "";
+    }
+}
+
+function onFilterChange() {
+    currentPage = 1;
+    renderQuestions();
+    updateFilterOptions();
+}
+
+/* ---------------------------
+   Flashcards
+----------------------------*/
+function renderFlashcardsList() {
+    const fcPlayer = document.getElementById('fcPlayer');
+    const fcListContainer = document.getElementById('fcListContainer');
+
+    if (fcPlayer && fcPlayer.style.display === 'block') return;
+
+    if (fcListContainer) fcListContainer.style.display = 'block';
+
+    const fcSearch = document.getElementById('fcSearch');
+    const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
+    const fcCount = document.getElementById('fcCount');
+    const listaFlashcards = document.getElementById('listaFlashcards');
+
+    const term = fcSearch ? fcSearch.value.toLowerCase().trim() : '';
+    const fDisc = fcDisciplinaFilter ? fcDisciplinaFilter.value : '';
+    const fAssu = fcAssuntoFilter ? fcAssuntoFilter.value : '';
+
+    const filtered = BD_FC.filter(fc => {
+        const matchSearch = (fc.assunto || "").toLowerCase().includes(term) ||
+            (fc.frente || "").toLowerCase().includes(term) ||
+            (fc.verso || "").toLowerCase().includes(term);
+        const matchDisc = !fDisc || fc.disciplina === fDisc;
+        const matchAssunto = !fAssu || fc.assunto === fAssu;
+
+        return matchSearch && matchDisc && matchAssunto;
+    });
+
+    if (fcCount) fcCount.textContent = `Total: ${filtered.length} flashcards`;
+
+    if (filtered.length === 0) {
+        if (listaFlashcards) listaFlashcards.innerHTML = `<p class="meta" style="text-align:center; padding: 20px;">Nenhum flashcard encontrado.</p>`;
+        return;
+    }
+
+    if (listaFlashcards) {
+        listaFlashcards.innerHTML = filtered.map(fc => `
+            <div class="qitem" id="fc-${fc.id}">
+                <div class="meta" style="margin-bottom:5px;">
+                    <span class="badge-diff diff-media" style="margin:0; font-size:0.7rem;">${escapeHtml(fc.disciplina || 'Geral')}</span>
+                    ${escapeHtml(fc.assunto || 'Sem Título')}
+                </div>
+                <p style="font-weight:500; margin-bottom:10px;">${escapeHtml(fc.frente)}</p>
+                <div class="actions">
+                    <button onclick="editFC(${fc.id})" class="btn secondary">Editar</button>
+                    <button onclick="delFC(${fc.id})" class="btn secondary" style="background: var(--danger)">Excluir</button>
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+function openFCForm() {
+    const formFC = document.getElementById('formFC');
+    const formCardFC = document.getElementById('formCardFC');
+    const formContainer = document.getElementById('formCard');
+
+    if (formFC) formFC.reset();
+    document.getElementById('fcId').value = '';
+    if (formCardFC) formCardFC.style.display = 'block';
+    if (formCardFC) formCardFC.scrollIntoView();
+    if (formContainer) formContainer.style.display = 'none';
+}
+
+function saveFC(e) {
+    e.preventDefault();
+    const id = document.getElementById('fcId').value;
+    const disciplina = document.getElementById('fcDisciplina').value.trim();
+    const assunto = document.getElementById('fcAssunto').value.trim();
+    const frente = document.getElementById('fcFrente').value.trim();
+    const verso = document.getElementById('fcVerso').value.trim();
 
     if (!frente || !verso) {
-        showToast('Frente e verso do flashcard são obrigatórios.', 'danger');
+        showToast("Preencha Frente e Verso.", "error");
         return;
     }
 
-    const newFlashcard = {
-        id: id || crypto.randomUUID(),
-        frente: frente,
-        verso: verso,
-        disciplina: disciplina,
-        tags: tags,
-        // Espaçamento de Repetição Otimizada (Spaced Repetition System - SRS)
-        proxRevisao: id ? appState.flashcardData.find(c => c.id === id).proxRevisao : new Date().toISOString(),
-        interval: id ? appState.flashcardData.find(c => c.id === id).interval : 0,
-        ef: id ? appState.flashcardData.find(c => c.id === id).ef : 2.5, // Fator de facilidade
+    const novoFC = {
+        disciplina: disciplina || "Geral",
+        assunto: assunto || "Sem Título",
+        frente,
+        verso
     };
 
     if (id) {
-        // Edição
-        const index = appState.flashcardData.findIndex(c => c.id === id);
+        const index = BD_FC.findIndex(f => f.id == id);
         if (index !== -1) {
-            appState.flashcardData[index] = newFlashcard;
-            showToast('Flashcard editado com sucesso!', 'success');
+            BD_FC[index] = {
+                ...BD_FC[index],
+                ...novoFC
+            };
         }
     } else {
-        // Novo flashcard
-        appState.flashcardData.push(newFlashcard);
-        showToast('Flashcard adicionado com sucesso!', 'success');
+        novoFC.id = Date.now();
+        BD_FC.push(novoFC);
+    }
+    saveBD_FC();
+    showToast("Flashcard salvo!", "success");
+    const formCardFC = document.getElementById('formCardFC');
+    if (formCardFC) formCardFC.style.display = 'none';
+
+    // Atualiza filtros após salvar
+    updateFCFilters();
+    renderFlashcardsList();
+}
+
+window.editFC = function(id) {
+    const fc = BD_FC.find(f => f.id == id);
+    if (!fc) return;
+    openFCForm();
+    document.getElementById('fcId').value = fc.id;
+    document.getElementById('fcDisciplina').value = fc.disciplina || "";
+    document.getElementById('fcAssunto').value = fc.assunto || fc.titulo || "";
+    document.getElementById('fcFrente').value = fc.frente;
+    document.getElementById('fcVerso').value = fc.verso;
+};
+
+window.delFC = function(id) {
+    if (!confirm('Excluir este Flashcard?')) return;
+    BD_FC = BD_FC.filter(f => f.id != id);
+    saveBD_FC();
+
+    // Atualiza filtros após excluir
+    updateFCFilters();
+    renderFlashcardsList();
+};
+
+function forceUpdateFCFilters() {
+    if (CURRENT_MODULE === 'flashcards') {
+        updateFCFilters();
+    }
+}
+
+// 2. Cascata para FLASHCARDS
+function updateFCFilters() {
+    console.log("Atualizando filtros de flashcards...");
+
+    const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
+
+    if (!fcDisciplinaFilter || !fcAssuntoFilter) {
+        console.error("Elementos de filtro de flashcards não encontrados");
+        return;
     }
 
-    saveState();
-    renderFlashcardsModule();
+    // Extrai disciplinas únicas
+    const disciplinas = [...new Set(BD_FC.map(f => f.disciplina).filter(d => d && d.trim() !== ''))].sort();
+    const currentDisc = fcDisciplinaFilter.value || '';
+
+    console.log("Disciplinas encontradas:", disciplinas);
+
+    // Renderiza opções de disciplina
+    renderSelectOptions(fcDisciplinaFilter, "Todas as disciplinas", disciplinas, currentDisc);
+
+    // Atualiza opções de assunto baseado na disciplina selecionada
+    updateFCAssuntoOptions();
 }
 
-/**
- * Filtra a lista de flashcards por tag.
- * @param {string} tag - A tag para filtrar.
- */
-function filterFcByTag(tag) {
-    const container = document.getElementById('flashcardListContainer');
-    container.dataset.filterTag = tag || '';
-    document.getElementById('tagFilterFc').value = tag || '';
-    renderFlashcardList();
+function updateFCAssuntoOptions() {
+    const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
+
+    if (!fcDisciplinaFilter || !fcAssuntoFilter) return;
+
+    const selectedDisc = fcDisciplinaFilter.value;
+    let assuntos = [];
+
+    if (selectedDisc) {
+        assuntos = [...new Set(
+            BD_FC
+            .filter(f => f.disciplina === selectedDisc)
+            .map(f => f.assunto)
+            .filter(a => a && a.trim() !== '')
+        )].sort();
+    } else {
+        assuntos = [...new Set(
+            BD_FC
+            .map(f => f.assunto)
+            .filter(a => a && a.trim() !== '')
+        )].sort();
+    }
+
+    console.log("Assuntos encontrados para disciplina", selectedDisc, ":", assuntos);
+
+    renderSelectOptions(fcAssuntoFilter, "Todos os assuntos", assuntos, fcAssuntoFilter.value);
 }
 
-/**
- * Renderiza a lista de flashcards na interface do gerenciador.
- */
-function renderFlashcardList() {
-    const container = document.getElementById('flashcardListContainer');
-    const paginationControls = document.getElementById('paginationControlsFc');
-    if (!container || !paginationControls) return;
+/* ---------------------------
+   Flashcard Logic
+----------------------------*/
+function startFlashcardStudy() {
+    if (BD_FC.length === 0) {
+        showToast("Crie flashcards primeiro.", "error");
+        return;
+    }
 
-    const filterTag = container.dataset.filterTag || '';
+    // Usa os filtros atuais para o estudo
+    const fcSearch = document.getElementById('fcSearch');
+    const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
 
-    // Filtra os flashcards
-    const filteredCards = appState.flashcardData.filter(c =>
-        !filterTag || (c.tags && c.tags.includes(filterTag.toLowerCase()))
-    );
+    const term = fcSearch ? fcSearch.value.toLowerCase().trim() : '';
+    const fDisc = fcDisciplinaFilter ? fcDisciplinaFilter.value : '';
+    const fAssu = fcAssuntoFilter ? fcAssuntoFilter.value : '';
 
-    // Ordena por data de próxima revisão para mostrar o que precisa ser revisado primeiro
-    filteredCards.sort((a, b) => new Date(a.proxRevisao) - new Date(b.proxRevisao));
+    fcList = BD_FC.filter(fc => {
+        const matchSearch = (fc.assunto || "").toLowerCase().includes(term) ||
+            (fc.frente || "").toLowerCase().includes(term);
+        const matchDisc = !fDisc || fc.disciplina === fDisc;
+        const matchAssunto = !fAssu || fc.assunto === fAssu;
+        return matchSearch && matchDisc && matchAssunto;
+    });
 
-    const itemsPerPage = 10;
-    const totalPages = Math.ceil(filteredCards.length / itemsPerPage);
-    let currentPage = parseInt(container.dataset.currentPage) || 1;
+    if (fcList.length === 0) {
+        showToast("Nenhum flashcard neste filtro.", "error");
+        return;
+    }
+
+    fcList.sort(() => Math.random() - 0.5);
+
+    fcIndex = 0;
+
+    const fcListContainer = document.getElementById('fcListContainer');
+    const fcPlayer = document.getElementById('fcPlayer');
+    const headerControls = document.querySelector('header .controls');
+
+    if (fcListContainer) fcListContainer.style.display = 'none';
+    if (fcPlayer) fcPlayer.style.display = 'block';
+    if (headerControls) headerControls.style.display = 'none';
+
+    showFlashcard(0);
+}
+
+function showFlashcard(index) {
+    if (index < 0) index = 0;
+    if (index >= fcList.length) index = fcList.length - 1;
+    fcIndex = index;
+
+    const fc = fcList[fcIndex];
+    const fcContentFront = document.getElementById('fcContentFront');
+    const fcContentBack = document.getElementById('fcContentBack');
+    const fcCardElement = document.getElementById('fcCardElement');
+
+    if (fcContentFront) fcContentFront.textContent = fc.frente;
+    if (fcContentBack) fcContentBack.textContent = fc.verso;
+
+    if (fcCardElement) fcCardElement.classList.remove('is-flipped');
+}
+
+function flipCard() {
+    const fcCardElement = document.getElementById('fcCardElement');
+    if (fcCardElement) fcCardElement.classList.toggle('is-flipped');
+}
+
+function nextCard() {
+    if (fcIndex < fcList.length - 1) {
+        const fcCardElement = document.getElementById('fcCardElement');
+        if (fcCardElement && fcCardElement.classList.contains('is-flipped')) {
+            fcCardElement.classList.remove('is-flipped');
+            setTimeout(() => showFlashcard(fcIndex + 1), 300);
+        } else {
+            showFlashcard(fcIndex + 1);
+        }
+    } else {
+        showToast("Fim da pilha!", "success");
+    }
+}
+
+function prevCard() {
+    if (fcIndex > 0) {
+        const fcCardElement = document.getElementById('fcCardElement');
+        if (fcCardElement && fcCardElement.classList.contains('is-flipped')) {
+            fcCardElement.classList.remove('is-flipped');
+            setTimeout(() => showFlashcard(fcIndex - 1), 300);
+        } else {
+            showFlashcard(fcIndex - 1);
+        }
+    }
+}
+
+function exitFlashcardStudy() {
+    const fcPlayer = document.getElementById('fcPlayer');
+    const fcListContainer = document.getElementById('fcListContainer');
+    const headerControls = document.querySelector('header .controls');
+
+    if (fcPlayer) fcPlayer.style.display = 'none';
+    if (fcListContainer) fcListContainer.style.display = 'block';
+    if (headerControls) headerControls.style.display = 'flex';
+}
+
+/* ---------------------------
+   QUIZ E TIMER
+----------------------------*/
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${pad(minutes)}:${pad(remainingSeconds)}`;
+}
+
+function startTimer() {
+    const quizTimerEl = document.getElementById('quizTimer');
+    startTime = Date.now();
+    if (quizTimerEl) quizTimerEl.textContent = "00:00";
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = Math.floor((now - startTime) / 1000);
+        if (quizTimerEl) quizTimerEl.textContent = formatTime(elapsed);
+    }, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function initQuiz() {
+    try {
+        if (BD.length === 0) {
+            showToast('Adicione questões primeiro.', 'error');
+            return;
+        }
+
+        const headerControls = document.querySelector('header .controls');
+        const formContainer = document.getElementById('formCard');
+        const paginationControls = document.getElementById('paginationControls');
+        const questoesCountEl = document.getElementById('questoesCount');
+        const timerContainer = document.getElementById('timerContainer');
+
+        if (headerControls) headerControls.style.display = 'none';
+        if (formContainer) formContainer.style.display = 'none';
+        if (paginationControls) paginationControls.style.display = 'none';
+        if (questoesCountEl) questoesCountEl.style.display = 'none';
+        document.querySelectorAll('.top-bar .search').forEach(el => el.style.display = 'none');
+
+        if (timerContainer) timerContainer.style.display = 'block';
+
+        const filteredForQuiz = getFilteredBD();
+
+        if (filteredForQuiz.length === 0) {
+            showToast('Nenhuma questão para os filtros atuais.', 'error');
+            sairTreino(false);
+            return;
+        }
+
+        filteredForQuiz.sort(() => Math.random() - 0.5);
+
+        let limit = 0;
+        const fQtdTreino = document.getElementById('fQtdTreino');
+        if (fQtdTreino) limit = parseInt(fQtdTreino.value) || 0;
+
+        if (limit > 0 && limit < filteredForQuiz.length) {
+            quizOrder = filteredForQuiz.slice(0, limit);
+        } else {
+            quizOrder = filteredForQuiz;
+        }
+
+        const lista = document.getElementById('lista');
+        if (lista) {
+            lista.classList.remove('list');
+            lista.classList.add('quiz-container');
+        }
+
+        inQuiz = true;
+        quizIndex = 0;
+        const quizTimerEl = document.getElementById('quizTimer');
+        if (quizTimerEl) quizTimerEl.style.display = 'inline-block';
+        startTimer();
+        mostrarQuiz();
+    } catch (err) {
+        console.error(err);
+        alert("Erro ao iniciar Quiz: " + err.message);
+        sairTreino(false);
+    }
+}
+
+function mostrarQuiz() {
+    try {
+        if (!inQuiz || quizOrder.length === 0) return;
+
+        const q = quizOrder[quizIndex];
+        const total = quizOrder.length;
+        const current = quizIndex + 1;
+
+        const resolucaoEl = document.getElementById('resultado');
+        const quizActions = document.getElementById('quizActions');
+        const lista = document.getElementById('lista');
+        const quizTimerEl = document.getElementById('quizTimer');
+
+        if (!q) {
+            stopTimer();
+            if (lista) {
+                lista.innerHTML = `
+            <div class="card quiz-card" style="text-align: center;">
+              <div style="font-size: 4rem; margin-bottom: 20px;">🎉</div>
+              <h2 style="color: var(--success); margin-bottom: 15px;">Treino Concluído!</h2>
+              <p style="font-size: 1.2rem; margin-bottom: 10px;">Você completou <strong>${total} questões</strong></p>
+              <p style="font-size: 1.1rem; color: var(--text-muted); margin-bottom: 25px;">
+                Tempo total: <strong>${quizTimerEl ? quizTimerEl.textContent : '00:00'}</strong>
+              </p>
+              <button onclick="sairTreino(false)" class="btn primary" style="padding: 15px 30px; font-size: 1.1rem;">
+                🏠 Voltar ao Banco
+              </button>
+            </div>`;
+            }
+            if (quizTimerEl) quizTimerEl.style.display = 'none';
+            if (resolucaoEl) resolucaoEl.innerHTML = '';
+            if (quizActions) quizActions.innerHTML = '';
+            return;
+        }
+
+        const opcoes = [{
+                letra: 'A',
+                texto: q.A
+            },
+            {
+                letra: 'B',
+                texto: q.B
+            },
+            {
+                letra: 'C',
+                texto: q.C
+            },
+            {
+                letra: 'D',
+                texto: q.D
+            },
+            {
+                letra: 'E',
+                texto: q.E
+            }
+        ].filter(opt => opt.texto && opt.texto.trim() !== "");
+
+        const contentHtml = renderEnunciadoWithImage(q.enunciado, q.imagem, true);
+        const revClass = q.revisao ? 'active' : '';
+        const revTitle = q.revisao ? 'Remover da Revisão' : 'Marcar para Revisão';
+
+        if (lista) {
+            lista.innerHTML = `
+            <div class="card quiz-card">
+              <!-- Header com botão de revisão no canto superior direito -->
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                <div style="flex: 1;">
+                  <div class="questao-atual" style="display: inline-block; margin-bottom: 10px;">Questão ${current}/${total}</div>
+                  <div style="color: var(--text-muted); font-size: 0.9rem;">
+                    <strong>${escapeHtml(q.disciplina || 'Geral')}</strong> • ${escapeHtml(q.banca || 'N/A')} • ${escapeHtml(q.ano || 'Ano')}
+                    ${q.assunto ? ` • ${escapeHtml(q.assunto)}` : ''}
+                  </div>
+                </div>
+                <!-- Botão de revisão no canto superior direito -->
+                <button id="btnQuizRev-${q.id}" class="btn-icon ${revClass}" onclick="toggleRevisao(${q.id}, true)" title="${revTitle}" 
+                        style="font-size: 1.5rem; margin-left: 15px; flex-shrink: 0;">
+                  🚩
+                </button>
+              </div>
+
+              <!-- Enunciado -->
+              <div style="
+                background: var(--bg); 
+                padding: 20px; 
+                border-radius: 12px; 
+                border: 2px solid var(--border);
+                margin-bottom: 25px;
+                font-size: 1.1rem;
+                line-height: 1.6;
+              ">
+                ${contentHtml}
+              </div>
+
+              <!-- Opções -->
+              <div style="margin-top: 10px;">
+                <h4 style="margin: 0 0 15px 0; color: var(--text-primary); text-align: center;">Selecione a alternativa correta:</h4>
+                <div id="opcoesQuiz" style="display: flex; flex-direction: column; gap: 12px;">
+                  ${opcoes.map(opt => `
+                    <button class="quiz-option" onclick="checarResposta(this, '${opt.letra}', ${q.id})">
+                      <strong style="color: inherit;">${opt.letra})</strong> 
+                      <span style="margin-left: 8px;">${escapeHtml(opt.texto)}</span>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        if (resolucaoEl) resolucaoEl.innerHTML = '';
+
+        // Botões Sair e Pular no canto inferior direito
+        if (quizActions) {
+            quizActions.innerHTML = `
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+              <button id="btnSair" onclick="sairTreino()" class="btn secondary" style="background: var(--danger); color: white;">
+                🏃 Sair
+              </button>
+              <button id="btnPular" onclick="pularPergunta()" class="btn secondary">
+                ⏭️ Pular
+              </button>
+            </div>
+          `;
+        }
+    } catch (err) {
+        console.error(err);
+        alert("Erro ao exibir questão: " + err.message);
+        pularPergunta();
+    }
+}
+
+function checarResposta(btn, letra, id) {
+    const q = quizOrder.find(x => x.id == id);
+    const realQ = BD.find(x => x.id == id);
+    if (!q) return;
+
+    const opcoes = document.querySelectorAll('.quiz-option');
+    opcoes.forEach(option => option.disabled = true);
+    btn.classList.add('selecionada');
+
+    const quizActions = document.getElementById('quizActions');
+    const btnPular = document.getElementById('btnPular');
+    if (btnPular) btnPular.remove();
+
+    if (realQ) {
+        if (!realQ.stats) realQ.stats = {
+            correct: 0,
+            wrong: 0
+        };
+        if (letra === q.correta) {
+            realQ.stats.correct++;
+        } else {
+            realQ.stats.wrong++;
+        }
+        saveBD();
+        updateDailyGoal(1);
+    }
+
+    if (quizActions && !document.getElementById('btnVerResp')) {
+        quizActions.innerHTML += `
+          <button id="btnVerResp" onclick="mostrarResolucao()" class="btn primary" style="margin-left: 10px;">Ver Resposta</button>
+      `;
+    }
+}
+
+function mostrarResolucao() {
+    const q = quizOrder[quizIndex];
+    if (!q) return;
+
+    const opcoes = document.querySelectorAll('.quiz-option');
+    const resolucaoEl = document.getElementById('resultado');
+    let acertou = false;
+
+    opcoes.forEach(option => {
+        const text = option.textContent.trim();
+        const letra = text.substring(0, 1);
+        if (letra === q.correta) {
+            option.classList.add('certa');
+            if (option.classList.contains('selecionada')) acertou = true;
+        }
+        if (option.classList.contains('selecionada') && letra !== q.correta) {
+            option.classList.add('errada');
+        }
+        option.classList.remove('selecionada');
+    });
+
+    let feedbackHTML = acertou ?
+        `<div class="quiz-feedback acerto">
+         <div style="font-size: 2rem; margin-bottom: 10px;">🎉</div>
+         <div>Resposta Correta!</div>
+         <div style="font-size: 0.9rem; margin-top: 8px; opacity: 0.9;">Você acertou esta questão!</div>
+       </div>` :
+        `<div class="quiz-feedback erro">
+         <div style="font-size: 2rem; margin-bottom: 10px;">💡</div>
+         <div>Resposta Incorreta</div>
+         <div style="font-size: 0.9rem; margin-top: 8px; opacity: 0.9;">A alternativa correta é <strong>${q.correta}</strong></div>
+       </div>`;
+
+    // Resolução formatada com melhor visualização
+    const resolucaoConteudo = q.resolucao ?
+        `<div class="quiz-resolucao">
+       <div style="font-size: 1.2rem; font-weight: 700; color: var(--accent); margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+         <span>💡</span>
+         <span>Resolução Detalhada</span>
+       </div>
+       <div style="line-height: 1.7; font-size: 1.05rem;">
+         ${escapeHtml(q.resolucao).replace(/\n/g, '<br>')}
+       </div>
+       ${q.tags ? `
+         <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);">
+           <strong style="color: var(--text-muted);">Tags:</strong>
+           <div style="margin-top: 8px;">
+             ${q.tags.split(',').filter(t => t.trim()).map(t => 
+               `<span class="tag" style="font-size: 0.8rem; margin: 2px;">${escapeHtml(t.trim())}</span>`
+             ).join('')}
+           </div>
+         </div>
+       ` : ''}
+     </div>` :
+        `<div class="quiz-resolucao">
+         <div style="text-align: center; padding: 30px 20px; color: var(--text-muted);">
+           <div style="font-size: 3rem; margin-bottom: 15px;">📝</div>
+           <div style="font-size: 1.1rem; font-weight: 600;">Nenhuma resolução cadastrada</div>
+           <div style="margin-top: 8px;">Esta questão ainda não possui uma resolução detalhada.</div>
+         </div>
+       </div>`;
+
+    if (resolucaoEl) resolucaoEl.innerHTML = feedbackHTML + resolucaoConteudo;
+
+    const quizActions = document.getElementById('quizActions');
+    const btnVerResp = document.getElementById('btnVerResp');
+    if (btnVerResp) btnVerResp.remove();
+
+    if (quizActions) {
+        const btnProx = document.getElementById('btnProx');
+        if (!btnProx) {
+            quizActions.innerHTML += `
+        <button id="btnProx" onclick="proximaPergunta()" class="btn primary" style="
+          background: linear-gradient(135deg, var(--success), var(--accent));
+          color: white;
+          font-weight: 700;
+          padding: 15px 30px;
+          font-size: 1.1rem;
+        ">
+          ⏭️ Próxima Questão
+        </button>
+      `;
+        }
+    }
+
+    // Scroll suave para a resolução
+    setTimeout(() => {
+        if (resolucaoEl) {
+            resolucaoEl.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+        }
+    }, 300);
+}
+
+function proximaPergunta() {
+    quizIndex++;
+    mostrarQuiz();
+}
+
+function pularPergunta() {
+    const q = quizOrder.splice(quizIndex, 1)[0];
+    quizOrder.push(q);
+    mostrarQuiz();
+}
+
+function sairTreino(askConfirm = true) {
+    if (askConfirm && !confirm('Sair do treino?')) return;
+
+    stopTimer();
+    inQuiz = false;
+    const quizTimerEl = document.getElementById('quizTimer');
+    if (quizTimerEl) quizTimerEl.style.display = 'none';
+
+    const headerControls = document.querySelector('header .controls');
+    const formContainer = document.getElementById('formCard');
+    const timerContainer = document.getElementById('timerContainer');
+
+    if (headerControls) headerControls.style.display = 'flex';
+    if (formContainer) formContainer.style.display = 'none';
+
+    document.querySelectorAll('.top-bar .search').forEach(el => el.style.display = 'flex');
+    if (timerContainer) timerContainer.style.display = 'none';
+
+    renderQuestions();
+}
+
+/* ---------------------------
+   Função de Filtro Global (Questões)
+----------------------------*/
+function getFilteredBD() {
+    const fSearch = document.getElementById('fSearch');
+    const fAssunto = document.getElementById('fAssunto');
+    const fAno = document.getElementById('fAno');
+    const fBanca = document.getElementById('fBanca');
+    const fDisciplina = document.getElementById('fDisciplina');
+    const fRevisao = document.getElementById('fRevisao');
+    const fDificuldade = document.getElementById('fDificuldade');
+
+    const termo = fSearch ? fSearch.value.toLowerCase().trim() : '';
+    const valAssunto = fAssunto ? fAssunto.value : '';
+    const valAno = fAno ? fAno.value : '';
+    const valBanca = fBanca ? fBanca.value : '';
+    const valDisciplina = fDisciplina ? fDisciplina.value : '';
+    const valRevisao = fRevisao ? fRevisao.checked : false;
+    const valDificuldade = fDificuldade ? fDificuldade.value : '';
+
+    return BD.filter(q => {
+        const matchSearch = !termo ||
+            (q.enunciado || "").toLowerCase().includes(termo) ||
+            (q.assunto || "").toLowerCase().includes(termo) ||
+            (q.topico || "").toLowerCase().includes(termo) ||
+            (q.tags || "").toLowerCase().includes(termo);
+
+        const matchAssunto = !valAssunto || q.assunto === valAssunto;
+        const matchAno = !valAno || String(q.ano) === valAno;
+        const matchBanca = !valBanca || q.banca === valBanca;
+        const matchDisciplina = !valDisciplina || q.disciplina === valDisciplina;
+        const matchRevisao = !valRevisao || q.revisao === true;
+        const matchDificuldade = !valDificuldade || q.dificuldade === valDificuldade;
+
+        return matchSearch && matchAssunto && matchAno && matchBanca && matchDisciplina && matchRevisao && matchDificuldade;
+    });
+}
+
+function renderQuestions() {
+    if (inQuiz) {
+        const questoesCountEl = document.getElementById('questoesCount');
+        const paginationControls = document.getElementById('paginationControls');
+        if (questoesCountEl) questoesCountEl.style.display = 'none';
+        if (paginationControls) paginationControls.style.display = 'none';
+        return;
+    }
+
+    const lista = document.getElementById('lista');
+    if (lista) {
+        lista.classList.remove('quiz-container');
+        lista.classList.add('list');
+    }
+
+    const resEl = document.getElementById('resultado');
+    const actEl = document.getElementById('quizActions');
+    if (resEl) resEl.innerHTML = '';
+    if (actEl) actEl.innerHTML = '';
+
+    const filteredBD = getFilteredBD();
+    const total = filteredBD.length;
+
+    const questoesCountEl = document.getElementById('questoesCount');
+    if (questoesCountEl) {
+        questoesCountEl.style.display = 'block';
+        questoesCountEl.innerHTML = `Total: <span style="color: var(--accent)">${total}</span> questões`;
+    }
+
+    if (total === 0) {
+        if (lista) {
+            lista.innerHTML = `<p class="meta" style="text-align:center; padding: 20px;">Nenhuma questão encontrada.</p>`;
+        }
+        const paginationControls = document.getElementById('paginationControls');
+        if (paginationControls) paginationControls.style.display = 'none';
+        return;
+    }
+
+    const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
     if (currentPage > totalPages) currentPage = totalPages;
     if (currentPage < 1) currentPage = 1;
 
-    container.dataset.currentPage = currentPage;
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE;
+    const pageItems = filteredBD.slice(start, end);
 
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
-    const paginatedCards = filteredCards.slice(start, end);
+    if (lista) {
+        lista.innerHTML = pageItems.map(q => {
+            const stats = q.stats || {
+                correct: 0,
+                wrong: 0
+            };
+            const totalAttempts = stats.correct + stats.wrong;
+            const perc = totalAttempts > 0 ? Math.round((stats.correct / totalAttempts) * 100) : 0;
+            const statsHtml = totalAttempts > 0 ?
+                `<span class="stats-badge" title="${stats.correct} acertos / ${stats.wrong} erros">Tx: ${perc}% (${totalAttempts}x)</span>` :
+                '';
 
-    let html = '';
-    if (filteredCards.length === 0) {
-        html = '<p class="empty-state">Nenhum flashcard encontrado. Adicione um novo ou ajuste o filtro.</p>';
-    } else {
-        html = paginatedCards.map(c => {
-            const needsReview = new Date(c.proxRevisao) <= new Date();
-            const statusClass = needsReview ? 'revisao-tag' : 'dominada-tag';
-            const statusText = needsReview ? 'REVISAR' : `Próx: ${new Date(c.proxRevisao).toLocaleDateString()}`;
+            const revClass = q.revisao ? 'active' : '';
+            const revTitle = q.revisao ? 'Remover da Revisão' : 'Marcar para Revisão';
+
+            let diffBadge = '';
+            if (q.dificuldade) {
+                let diffClass = 'diff-media';
+                if (q.dificuldade === 'Fácil') diffClass = 'diff-facil';
+                if (q.dificuldade === 'Difícil') diffClass = 'diff-dificil';
+                diffBadge = `<span class="badge-diff ${diffClass}">${q.dificuldade}</span>`;
+            }
 
             return `
-                <div class="list-item flashcard-item card">
-                    <div class="item-header">
-                        <span class="disciplina-tag" style="background-color: ${stringToColor(c.disciplina)};">${c.disciplina}</span>
-                        <span class="status-tag ${statusClass}">${statusText}</span>
-                    </div>
-                    <p class="item-content">${c.frente.substring(0, 100)}...</p>
-                    <div class="item-tags">
-                        ${(c.tags || []).map(tag => `<span class="tag">${tag}</span>`).join('')}
-                    </div>
-                    <div class="item-actions">
-                        <button class="btn info small" onclick="editFC('${c.id}')">
-                            <i class="fas fa-edit"></i> Editar
-                        </button>
-                        <button class="btn danger small" onclick="delFC('${c.id}')">
-                            <i class="fas fa-trash-alt"></i> Excluir
-                        </button>
-                    </div>
-                </div>
-            `;
+        <div class="qitem" id="q-${q.id}">
+          <div class="meta header-meta">
+            <div>
+                ${escapeHtml(q.disciplina || 'Disciplina')} — ${escapeHtml(q.banca || 'Banca')} (${escapeHtml(q.ano || 'Ano')})
+                ${diffBadge}
+                <br>
+                <b>${escapeHtml(q.assunto)}</b> — ${escapeHtml(q.topico)}
+            </div>
+            <div style="text-align:right;">
+                <button class="btn-icon ${revClass}" onclick="toggleRevisao(${q.id})" title="${revTitle}">🚩</button>
+                <br>
+                <small>Resp: <b>${escapeHtml(q.correta)}</b></small>
+            </div>
+          </div>
+
+          <p style="margin: 8px 0;">${renderEnunciadoWithImage(q.enunciado, q.imagem, false)}</p>
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+              <div class="tags-container">
+                 ${(q.tags || "").split(',').filter(t => t.trim()).map(t => 
+                   `<span class="tag clickable-tag" onclick="filterByTag('${escapeHtml(t.trim()).replace(/'/g, "\\'")}')" 
+                         title="Clique para filtrar por esta tag">${escapeHtml(t.trim())}</span>`
+                 ).join('')}
+                 ${statsHtml}
+              </div>
+          </div>
+
+          <div class="actions">
+            <button onclick="editQ(${q.id})" class="btn secondary">Editar</button>
+            <button onclick="delQ(${q.id})" class="btn secondary" style="background: var(--danger)">Excluir</button>
+            <button onclick="copyQuestion(${q.id})" class="btn secondary" style="background: var(--success)">Copiar</button>
+          </div>
+        </div>
+      `
         }).join('');
     }
 
-    container.innerHTML = html;
 
-    // Renderiza controles de paginação
-    paginationControls.innerHTML = `
-        <button class="btn secondary" onclick="changePageFc(${currentPage - 1}, ${totalPages})" ${currentPage <= 1 ? 'disabled' : ''}>
-            <i class="fas fa-chevron-left"></i> Anterior
-        </button>
-        <span>Página ${currentPage} de ${totalPages} (${filteredCards.length} flashcards)</span>
-        <button class="btn secondary" onclick="changePageFc(${currentPage + 1}, ${totalPages})" ${currentPage >= totalPages ? 'disabled' : ''}>
-            Próxima <i class="fas fa-chevron-right"></i>
-        </button>
-    `;
-}
+    const paginationControls = document.getElementById('paginationControls');
+    const pageInfo = document.getElementById('pageInfo');
+    const btnPrevPage = document.getElementById('btnPrevPage');
+    const btnNextPage = document.getElementById('btnNextPage');
 
-/**
- * Altera a página da lista de flashcards.
- * @param {number} newPage - O novo número da página.
- * @param {number} totalPages - Total de páginas.
- */
-function changePageFc(newPage, totalPages) {
-    const container = document.getElementById('flashcardListContainer');
-    if (newPage >= 1 && newPage <= totalPages) {
-        container.dataset.currentPage = newPage;
-        renderFlashcardList();
+    if (paginationControls) {
+        paginationControls.style.display = totalPages > 1 ? 'flex' : 'none';
+        if (pageInfo) pageInfo.textContent = `Página ${currentPage} de ${totalPages}`;
+        if (btnPrevPage) btnPrevPage.disabled = currentPage === 1;
+        if (btnNextPage) btnNextPage.disabled = currentPage === totalPages;
     }
 }
 
-/**
- * Edita um flashcard.
- * @param {string} id - ID do flashcard.
- */
-function editFC(id) {
-    const card = appState.flashcardData.find(c => c.id === id);
-    if (card) {
-        renderAddFlashcardForm(card);
-    }
+/* ---------------------------
+   Cadernos e Backup
+----------------------------*/
+function populateSavedFilters() {
+    const savedFiltersSelect = document.getElementById('savedFilters');
+    if (!savedFiltersSelect) return;
+    savedFiltersSelect.innerHTML = `<option value="">📂 Meus Cadernos...</option>`;
+    Object.keys(SAVED_FILTERS).forEach(name => {
+        savedFiltersSelect.innerHTML += `<option value="${name}">${name}</option>`;
+    });
 }
 
-/**
- * Exclui um flashcard.
- * @param {string} id - ID do flashcard.
- */
-function delFC(id) {
-    if (confirmAction('Tem certeza que deseja excluir este flashcard?')) {
-        appState.flashcardData = appState.flashcardData.filter(c => c.id !== id);
-        saveState();
-        showToast('Flashcard excluído.', 'success');
-        renderFlashcardsModule();
-    }
-}
+function saveCurrentFilter() {
+    const name = prompt("Dê um nome para este caderno:");
+    if (!name) return;
 
-/**
- * Inicia a sessão de estudo de flashcards.
- * @param {string} [studySet='all'] - Conjunto de estudo ('all' ou 'tag:<tag_name>').
- */
-function startFlashcardStudy(studySet = 'all') {
-    const now = new Date();
-    let cardsToStudy = [];
+    const fAssunto = document.getElementById('fAssunto');
+    const fDisciplina = document.getElementById('fDisciplina');
+    const fBanca = document.getElementById('fBanca');
+    const fAno = document.getElementById('fAno');
+    const fRevisao = document.getElementById('fRevisao');
+    const fDificuldade = document.getElementById('fDificuldade');
 
-    if (studySet === 'all' || studySet.startsWith('tag:')) {
-        let allCards = [...appState.flashcardData]; // Clone
-
-        if (studySet.startsWith('tag:')) {
-            const tag = studySet.split(':')[1];
-            allCards = allCards.filter(c => c.tags && c.tags.includes(tag.toLowerCase()));
-        }
-
-        // Seleciona cards que precisam de revisão (proxRevisao <= now)
-        cardsToStudy = allCards.filter(c => new Date(c.proxRevisao) <= now);
-
-        // Se a revisão não for suficiente, adiciona mais cards não revisados
-        if (cardsToStudy.length < 10 && allCards.length > cardsToStudy.length) {
-            const notReviewed = allCards.filter(c => new Date(c.proxRevisao) > now);
-            // Adiciona aleatoriamente para chegar a 10 cards (ou o total disponível)
-            const needed = 10 - cardsToStudy.length;
-            const randomSample = notReviewed.sort(() => 0.5 - Math.random()).slice(0, needed);
-            cardsToStudy = cardsToStudy.concat(randomSample);
-        }
-
-        // Embaralha o conjunto final
-        cardsToStudy.sort(() => 0.5 - Math.random());
-    }
-
-    if (cardsToStudy.length === 0) {
-        showToast('Nenhum flashcard para estudar no momento! Revise mais tarde.', 'info');
-        return;
-    }
-
-    appState.flashcardStudyData = {
-        currentCardIndex: 0,
-        cardsToStudy: cardsToStudy,
-        studySet: studySet,
-        isFlipped: false
+    SAVED_FILTERS[name] = {
+        assunto: fAssunto ? fAssunto.value : "",
+        disciplina: fDisciplina ? fDisciplina.value : "",
+        banca: fBanca ? fBanca.value : "",
+        ano: fAno ? fAno.value : "",
+        revisao: fRevisao ? fRevisao.checked : false,
+        dificuldade: fDificuldade ? fDificuldade.value : ""
     };
-
-    appState.currentModule = 'flashcardStudy';
-    showToast(`Iniciando Estudo com ${cardsToStudy.length} flashcards.`, 'info');
-    renderFlashcardStudy();
+    localStorage.setItem('BD_FILTROS', JSON.stringify(SAVED_FILTERS));
+    populateSavedFilters();
+    const savedFiltersSelect = document.getElementById('savedFilters');
+    if (savedFiltersSelect) savedFiltersSelect.value = name;
+    const btnDeleteFilter = document.getElementById('btnDeleteFilter');
+    if (btnDeleteFilter) btnDeleteFilter.style.display = 'inline-block';
+    showToast(`Caderno "${name}" salvo!`, 'success');
 }
 
-/**
- * Renderiza a interface de estudo de flashcards.
- */
-function renderFlashcardStudy() {
-    const data = appState.flashcardStudyData;
-    const card = data.cardsToStudy[data.currentCardIndex];
-
-    if (!card) {
-        renderFlashcardStudyEnd();
+function loadSavedFilter() {
+    const savedFiltersSelect = document.getElementById('savedFilters');
+    if (!savedFiltersSelect) return;
+    const name = savedFiltersSelect.value;
+    if (!name) {
+        const btnDeleteFilter = document.getElementById('btnDeleteFilter');
+        if (btnDeleteFilter) btnDeleteFilter.style.display = 'none';
         return;
     }
+    const saved = SAVED_FILTERS[name];
+    if (saved) {
+        const fAssunto = document.getElementById('fAssunto');
+        const fDisciplina = document.getElementById('fDisciplina');
+        const fBanca = document.getElementById('fBanca');
+        const fAno = document.getElementById('fAno');
+        const fRevisao = document.getElementById('fRevisao');
+        const fDificuldade = document.getElementById('fDificuldade');
+        const btnDeleteFilter = document.getElementById('btnDeleteFilter');
 
-    headerTitle.textContent = `Estudo de Flashcards (${data.currentCardIndex + 1}/${data.cardsToStudy.length})`;
-
-    const content = data.isFlipped ? card.verso : card.frente;
-    const sideLabel = data.isFlipped ? 'VERSO (Resposta)' : 'FRENTE (Pergunta)';
-
-    mainContent.innerHTML = `
-        <section class="module-flashcard-study">
-            <div class="card flashcard-display ${data.isFlipped ? 'flipped' : ''}" onclick="flipCard()">
-                <div class="fc-side-label">${sideLabel}</div>
-                <div class="fc-content">
-                    <span class="disciplina-tag" style="background-color: ${stringToColor(card.disciplina)};">${card.disciplina}</span>
-                    <p>${content}</p>
-                </div>
-            </div>
-
-            <div class="fc-controls">
-                ${data.isFlipped ? `
-                    <button class="btn success large" onclick="answerFlashcard(3)">
-                        <i class="fas fa-check"></i> Fácil (5+ dias)
-                    </button>
-                    <button class="btn info large" onclick="answerFlashcard(2)">
-                        <i class="fas fa-minus"></i> Médio (3 dias)
-                    </button>
-                    <button class="btn danger large" onclick="answerFlashcard(1)">
-                        <i class="fas fa-times"></i> Difícil (1 dia)
-                    </button>
-                ` : `
-                    <button class="btn primary large" onclick="flipCard()">
-                        <i class="fas fa-sync-alt"></i> Virar
-                    </button>
-                `}
-            </div>
-
-            <button id="btnFcExit" class="btn secondary" onclick="switchModule('home')">
-                <i class="fas fa-times"></i> Sair do Estudo
-            </button>
-        </section>
-    `;
-}
-
-/**
- * Vira o flashcard.
- */
-function flipCard() {
-    appState.flashcardStudyData.isFlipped = !appState.flashcardStudyData.isFlipped;
-    renderFlashcardStudy();
-}
-
-/**
- * Processa a resposta do usuário usando o algoritmo SM-2 (Spaced Repetition System).
- * @param {number} quality - Qualidade da resposta (1=Difícil, 2=Médio, 3=Fácil).
- */
-function answerFlashcard(quality) {
-    const card = appState.flashcardStudyData.cardsToStudy[appState.flashcardStudyData.currentCardIndex];
-
-    // 1. Encontra o flashcard original para atualizar
-    const originalCardIndex = appState.flashcardData.findIndex(c => c.id === card.id);
-    if (originalCardIndex === -1) {
-        proximoFlashcard();
-        return;
-    }
-
-    const originalCard = appState.flashcardData[originalCardIndex];
-    let ef = originalCard.ef || 2.5; // Fator de Facilidade
-    let interval = originalCard.interval || 0; // Intervalo em dias
-
-    // 2. Cálculo do novo Fator de Facilidade (EF)
-    ef = ef + (0.1 - (3 - quality) * (0.08 + (3 - quality) * 0.02));
-    if (ef < 1.3) ef = 1.3; // EF mínimo
-
-    // 3. Cálculo do novo Intervalo (I)
-    if (quality === 1) { // Errou/Difícil (reseta o intervalo)
-        interval = 1;
-    } else if (interval === 0) { // Primeira vez acertando
-        interval = 1;
-    } else if (interval === 1) { // Segunda vez acertando
-        interval = 6;
-    } else { // Terceira ou mais
-        interval = Math.round(interval * ef);
-    }
-
-    // 4. Calcula a Próxima Data de Revisão
-    const now = new Date();
-    const nextReviewDate = new Date(now.getTime() + (interval * 24 * 60 * 60 * 1000));
-
-    // 5. Atualiza o flashcard original
-    originalCard.ef = ef;
-    originalCard.interval = interval;
-    originalCard.proxRevisao = nextReviewDate.toISOString();
-
-    appState.flashcardData[originalCardIndex] = originalCard; // Salva a atualização
-
-    // 6. Atualiza progresso diário (consideramos acerto se a qualidade for 2 ou 3)
-    if (quality >= 2) {
-        incrementDailyProgress();
-    }
-
-    saveState();
-    proximoFlashcard();
-}
-
-/**
- * Avança para o próximo flashcard.
- */
-function proximoFlashcard() {
-    appState.flashcardStudyData.currentCardIndex++;
-    appState.flashcardStudyData.isFlipped = false;
-    renderFlashcardStudy();
-}
-
-/**
- * Renderiza a tela de fim de estudo de flashcards.
- */
-function renderFlashcardStudyEnd() {
-    headerTitle.textContent = 'Estudo de Flashcards Finalizado!';
-
-    mainContent.innerHTML = `
-        <section class="module-quiz-end">
-            <div class="card end-summary">
-                <h2>Sessão de Estudo Concluída!</h2>
-                <p>Você revisou ${appState.flashcardStudyData.cardsToStudy.length} flashcards.</p>
-                <p>O algoritmo de Repetição Espaçada otimizou suas datas de revisão.</p>
-            </div>
-
-            <div class="end-actions">
-                <button class="btn primary large" onclick="startFlashcardStudy()">
-                    <i class="fas fa-redo"></i> Estudar Novamente
-                </button>
-                <button class="btn secondary large" onclick="switchModule('home')">
-                    <i class="fas fa-home"></i> Voltar para o Início
-                </button>
-            </div>
-        </section>
-    `;
-
-    appState.flashcardStudyData.cardsToStudy = []; // Limpa o conjunto de estudo
-}
-
-// --- MÓDULO CRONOGRAMA INTELIGENTE ---
-
-/**
- * Renderiza a interface do cronograma.
- */
-function renderCronogramaModule() {
-    headerTitle.textContent = 'Cronograma Inteligente';
-
-    const materias = appState.cronograma.materias;
-    const dataFim = appState.cronograma.dataFim;
-    const dataFimStr = dataFim ? dataFim.toISOString().slice(0, 10) : '';
-
-    const isCronogramaGenerated = appState.cronograma.semanas && appState.cronograma.semanas.length > 0;
-
-    let materiasListHtml = '';
-    if (materias.length === 0) {
-        materiasListHtml = '<p class="empty-state">Nenhuma matéria adicionada. Use o formulário abaixo.</p>';
-    } else {
-        materiasListHtml = materias.map(m => `
-            <div class="materia-item card" style="border-left: 5px solid ${m.cor || '#000'}">
-                <span>${m.nome} (${m.horasPorSemana}h/sem)</span>
-                <button class="btn danger small" onclick="removerMateria('${m.nome}')">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-            </div>
-        `).join('');
-    }
-
-    let cronogramaDisplayHtml = '';
-    if (isCronogramaGenerated) {
-        cronogramaDisplayHtml = renderCronogramaDisplay();
-    } else {
-        cronogramaDisplayHtml = `
-            <div class="card empty-state-box">
-                <h4>Cronograma Não Gerado</h4>
-                <p>Adicione suas matérias e a data limite para gerar um plano de estudos semanal.</p>
-            </div>
-        `;
-    }
-
-    mainContent.innerHTML = `
-        <section class="module-cronograma">
-            <div class="cronograma-config">
-                <h3 class="section-subtitle">Configuração</h3>
-
-                <div class="form-container card">
-                    <form id="addMateriaForm" class="data-form inline-form">
-                        <div class="form-group">
-                            <label for="materiaNome">Matéria:</label>
-                            <input type="text" id="materiaNome" placeholder="Ex: Português" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="horasSemana">Horas/Semana:</label>
-                            <input type="number" id="horasSemana" min="1" max="50" value="5" required>
-                        </div>
-                        <button type="submit" class="btn primary">
-                            <i class="fas fa-plus"></i> Adicionar Matéria
-                        </button>
-                    </form>
-                    <button class="btn secondary small mt-2" onclick="importarMaterias()">
-                        <i class="fas fa-file-import"></i> Importar Matérias
-                    </button>
-                </div>
-
-                <div class="materias-list">
-                    <h4>Matérias Cadastradas (${materias.length})</h4>
-                    ${materiasListHtml}
-                </div>
-
-                <div class="generate-controls">
-                    <div class="form-group">
-                        <label for="dataFim">Data Limite da Prova:</label>
-                        <input type="date" id="dataFim" value="${dataFimStr}" required>
-                    </div>
-                    <button class="btn accent large" onclick="gerarCronograma()">
-                        <i class="fas fa-magic"></i> Gerar/Atualizar Cronograma
-                    </button>
-                    <button class="btn danger" onclick="reiniciarCronograma()">
-                        <i class="fas fa-trash-alt"></i> Limpar Tudo
-                    </button>
-                </div>
-            </div>
-
-            <div class="cronograma-display">
-                <h3 class="section-subtitle">Meu Plano de Estudos</h3>
-                <div id="cronogramaContainer">
-                    ${cronogramaDisplayHtml}
-                </div>
-            </div>
-        </section>
-    `;
-
-    // Adiciona listener para o formulário de matéria
-    document.getElementById('addMateriaForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const nome = document.getElementById('materiaNome').value.trim();
-        const horas = parseInt(document.getElementById('horasSemana').value);
-        adicionarMateriaCronograma(nome, horas);
-    });
-
-    // Adiciona listener para a data fim
-    document.getElementById('dataFim').addEventListener('change', (e) => {
-        appState.cronograma.dataFim = new Date(e.target.value + 'T00:00:00'); // Garante que seja a meia-noite
-        saveState();
-    });
-}
-
-/**
- * Renderiza o cronograma gerado em formato semanal.
- */
-function renderCronogramaDisplay() {
-    const semanas = appState.cronograma.semanas;
-    const totalSemanas = semanas.length;
-    let currentWeek = parseInt(document.getElementById('cronogramaContainer')?.dataset.currentWeek) || 1;
-    if (currentWeek > totalSemanas) currentWeek = totalSemanas;
-    if (currentWeek < 1) currentWeek = 1;
-
-    document.getElementById('cronogramaContainer').dataset.currentWeek = currentWeek;
-    const semana = semanas[currentWeek - 1];
-    if (!semana) return '<div>Nenhuma semana para exibir.</div>';
-
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-
-    let diasHtml = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'].map((diaNome, diaIndex) => {
-        const agendamentos = semana.dias[diaIndex];
-        const diaData = new Date(semana.dataInicio);
-        diaData.setDate(diaData.getDate() + diaIndex);
-        diaData.setHours(0, 0, 0, 0);
-
-        const isToday = diaData.getTime() === hoje.getTime();
-        const isPast = diaData < hoje;
-        const diaConcluido = agendamentos.isConcluido;
-        const diaHoras = agendamentos.horas;
-
-        const classList = [
-            'dia-card',
-            isToday ? 'today' : '',
-            diaConcluido ? 'concluido' : '',
-            isPast && !diaConcluido ? 'atrasado' : ''
-        ].join(' ');
-
-        const agendamentosHtml = agendamentos.materias.map(item => `
-            <div class="agendamento-item" style="border-left-color: ${item.cor}">
-                <span>${item.nome}</span>
-                <span class="horas">${item.horas}h</span>
-            </div>
-        `).join('');
-
-        return `
-            <div class="${classList}">
-                <div class="dia-header">
-                    <h4>${diaNome} (${diaData.toLocaleDateString()})</h4>
-                    <span class="horas-total">${diaHoras} horas</span>
-                </div>
-                <div class="agendamentos-container">
-                    ${agendamentosHtml || '<p class="text-muted small">Dia livre ou Semanas a revisar</p>'}
-                </div>
-                <div class="dia-actions">
-                    <button class="btn secondary small" onclick="atualizarHorasDia('${semana.id}', ${diaIndex})" title="Atualizar horas estudadas">
-                        <i class="fas fa-clock"></i> Horas
-                    </button>
-                    <button class="btn ${diaConcluido ? 'warning' : 'success'} small" onclick="marcarDiaConcluido('${semana.id}', ${diaIndex}, ${!diaConcluido})">
-                        <i class="fas ${diaConcluido ? 'fa-undo' : 'fa-check'}"></i> ${diaConcluido ? 'Desfazer' : 'Concluir'}
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    let displayHtml = `
-        <div class="semana-header card">
-            <button class="btn secondary" onclick="mostrarSemana(${currentWeek - 1}, ${totalSemanas})" ${currentWeek <= 1 ? 'disabled' : ''}>
-                <i class="fas fa-chevron-left"></i> Semana Anterior
-            </button>
-            <h3>Semana ${currentWeek} de ${totalSemanas}</h3>
-            <span class="date-range">${new Date(semana.dataInicio).toLocaleDateString()} - ${new Date(semana.dataFim).toLocaleDateString()}</span>
-            <button class="btn secondary" onclick="mostrarSemana(${currentWeek + 1}, ${totalSemanas})" ${currentWeek >= totalSemanas ? 'disabled' : ''}>
-                Próxima Semana <i class="fas fa-chevron-right"></i>
-            </button>
-        </div>
-        <div class="dias-grid">
-            ${diasHtml}
-        </div>
-        <div class="resumo-semana">
-            <p><strong>Total de Horas Agendadas na Semana:</strong> ${semana.totalHorasSemana}h</p>
-            <p><strong>Total de Horas Concluídas:</strong> ${semana.totalHorasConcluidas}h</p>
-        </div>
-    `;
-
-    return displayHtml;
-}
-
-/**
- * Adiciona uma nova matéria ao cronograma.
- * @param {string} nome - Nome da matéria.
- * @param {number} horasPorSemana - Horas semanais dedicadas.
- */
-function adicionarMateriaCronograma(nome, horasPorSemana) {
-    if (!nome || horasPorSemana < 1) {
-        showToast('Preencha o nome da matéria e horas por semana (mínimo 1).', 'danger');
-        return;
-    }
-
-    // Verifica se a matéria já existe
-    if (appState.cronograma.materias.some(m => m.nome.toLowerCase() === nome.toLowerCase())) {
-        showToast(`A matéria "${nome}" já foi adicionada.`, 'warning');
-        return;
-    }
-
-    const newMateria = {
-        nome: nome,
-        horasPorSemana: horasPorSemana,
-        cor: colors[colorIndex % colors.length], // Cicla pelas cores
-        progressoHoras: 0, // Horas acumuladas de estudo
-    };
-    colorIndex++; // Incrementa para a próxima cor
-
-    appState.cronograma.materias.push(newMateria);
-    saveState();
-    renderCronogramaModule();
-    showToast(`Matéria "${nome}" adicionada!`, 'success');
-}
-
-/**
- * Remove uma matéria do cronograma.
- * @param {string} nome - Nome da matéria a ser removida.
- */
-function removerMateria(nome) {
-    if (confirmAction(`Tem certeza que deseja remover a matéria "${nome}"? Isso irá limpar o cronograma gerado.`)) {
-        appState.cronograma.materias = appState.cronograma.materias.filter(m => m.nome !== nome);
-        appState.cronograma.semanas = []; // Limpa o cronograma gerado
-        saveState();
-        renderCronogramaModule();
-        showToast(`Matéria "${nome}" removida.`, 'success');
+        if (fAssunto) fAssunto.value = saved.assunto || "";
+        if (fDisciplina) fDisciplina.value = saved.disciplina || "";
+        if (fBanca) fBanca.value = saved.banca || "";
+        if (fAno) fAno.value = saved.ano || "";
+        if (fRevisao) fRevisao.checked = saved.revisao || false;
+        if (fDificuldade) fDificuldade.value = saved.dificuldade || "";
+        if (btnDeleteFilter) btnDeleteFilter.style.display = 'inline-block';
+        showToast(`Caderno "${name}" carregado.`, 'info');
+        onFilterChange();
     }
 }
 
-/**
- * Gera ou atualiza o cronograma semanal.
- */
-function gerarCronograma() {
-    const materias = appState.cronograma.materias;
-    let dataFim = appState.cronograma.dataFim;
-    const dataFimInput = document.getElementById('dataFim');
-
-    if (!dataFimInput.value && !dataFim) {
-        showToast('Selecione a Data Limite da Prova.', 'danger');
-        return;
-    }
-    if (dataFimInput.value) {
-        dataFim = new Date(dataFimInput.value + 'T00:00:00');
-        appState.cronograma.dataFim = dataFim;
-    }
-    if (materias.length === 0) {
-        showToast('Adicione pelo menos uma matéria para gerar o cronograma.', 'danger');
-        return;
-    }
-
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-
-    if (dataFim < hoje) {
-        showToast('A data limite da prova deve ser no futuro.', 'danger');
-        return;
-    }
-
-    // Calcula o total de horas a serem agendadas por semana
-    const totalHorasSemanais = materias.reduce((sum, m) => sum + m.horasPorSemana, 0);
-
-    // Encontra o início da próxima semana (Domingo)
-    const start = new Date(hoje);
-    start.setDate(start.getDate() + (7 - start.getDay())); // Vai para o próximo domingo
-    start.setHours(0, 0, 0, 0);
-
-    let semanas = [];
-    let currentWeekStart = start;
-    let weekId = 1;
-
-    // Distribuição das matérias (peso simples baseado em horas)
-    const distribution = {};
-    materias.forEach(m => {
-        distribution[m.nome] = m.horasPorSemana / totalHorasSemanais;
-    });
-
-    while (currentWeekStart <= dataFim) {
-        let currentWeekEnd = new Date(currentWeekStart);
-        currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
-
-        // Se a semana terminar após a data limite, ajusta o final (ou ignora, se for muito perto)
-        if (currentWeekStart > dataFim) break;
-
-        let semana = {
-            id: `s${weekId}`,
-            dataInicio: currentWeekStart.toISOString(),
-            dataFim: currentWeekEnd.toISOString(),
-            totalHorasSemana: totalHorasSemanais,
-            totalHorasConcluidas: 0,
-            dias: Array(7).fill(null).map((_, dayIndex) => ({
-                dia: dayIndex,
-                materias: [],
-                horas: 0,
-                isConcluido: false
-            }))
-        };
-
-        // Distribui as horas da semana pelos dias (excluindo domingo - dia 0)
-        let totalHorasRestantes = totalHorasSemanais;
-        let diasParaDistribuir = [1, 2, 3, 4, 5, 6]; // Seg a Sáb
-
-        // Calcula a média de horas por dia útil
-        let mediaHorasPorDia = totalHorasSemanais / diasParaDistribuir.length;
-
-        // Distribui o totalHorasSemanais pelos 6 dias úteis de forma pseudo-aleatória (para alternar as matérias)
-        let materiaIndex = 0;
-        let horasDistribuidas = 0;
-
-        diasParaDistribuir.forEach(dayIndex => {
-            let horasDoDia = 0;
-            // Tenta agendar um pouco mais ou um pouco menos que a média
-            const targetHorasDia = Math.max(1, Math.round(mediaHorasPorDia + (Math.random() * 1.5 - 0.75)));
-
-            while (horasDoDia < targetHorasDia && horasDistribuidas < totalHorasSemanais) {
-                const materia = materias[materiaIndex % materias.length];
-
-                // Limita a 2 horas por bloco de estudo por matéria
-                const horasParaEstudar = Math.min(2, targetHorasDia - horasDoDia, materia.horasPorSemana, totalHorasSemanais - horasDistribuidas);
-
-                if (horasParaEstudar > 0) {
-                    semana.dias[dayIndex].materias.push({
-                        nome: materia.nome,
-                        horas: horasParaEstudar,
-                        cor: materia.cor
-                    });
-                    semana.dias[dayIndex].horas += horasParaEstudar;
-                    horasDistribuidas += horasParaEstudar;
-                }
-
-                materiaIndex++; // Passa para a próxima matéria (alternância)
-                if (materiaIndex > 5 * materias.length) break; // Limite de segurança
-            }
-        });
-
-        // Atualiza o total de horas na semana (se houver arredondamento)
-        semana.totalHorasSemana = horasDistribuidas;
-
-        semanas.push(semana);
-        weekId++;
-        currentWeekStart = new Date(currentWeekEnd);
-        currentWeekStart.setDate(currentWeekStart.getDate() + 1); // Próximo dia (próximo domingo)
-    }
-
-    appState.cronograma.semanas = semanas;
-    saveState();
-    renderCronogramaModule();
-    showToast(`Cronograma gerado com sucesso! ${semanas.length} semanas de estudo.`, 'success');
-}
-
-/**
- * Marca um dia do cronograma como concluído e atualiza o total de horas concluídas.
- * @param {string} semanaId - ID da semana.
- * @param {number} diaIndex - Índice do dia (0=Dom, 1=Seg...).
- * @param {boolean} isConcluido - Novo estado de conclusão.
- */
-function marcarDiaConcluido(semanaId, diaIndex, isConcluido) {
-    const semana = appState.cronograma.semanas.find(s => s.id === semanaId);
-    if (!semana) return;
-
-    const dia = semana.dias[diaIndex];
-    if (dia.isConcluido === isConcluido) return; // Estado inalterado
-
-    dia.isConcluido = isConcluido;
-
-    // Recalcula o total de horas concluídas na semana
-    semana.totalHorasConcluidas = semana.dias.reduce((sum, d) => sum + (d.isConcluido ? d.horas : 0), 0);
-
-    saveState();
-    renderCronogramaModule();
-    showToast(`Dia ${isConcluido ? 'marcado' : 'desmarcado'} como concluído.`, 'info');
-}
-
-/**
- * Atualiza o número de horas estudadas em um dia.
- * @param {string} semanaId - ID da semana.
- * @param {number} diaIndex - Índice do dia (0=Dom, 1=Seg...).
- */
-function atualizarHorasDia(semanaId, diaIndex) {
-    const semana = appState.cronograma.semanas.find(s => s.id === semanaId);
-    if (!semana) return;
-
-    const dia = semana.dias[diaIndex];
-    const currentHours = dia.horas;
-
-    const newHoursInput = prompt(`Digite as horas reais de estudo para este dia (Agendado: ${currentHours}h):`, currentHours);
-
-    if (newHoursInput === null) return; // Usuário cancelou
-    const newHours = parseFloat(newHoursInput);
-
-    if (isNaN(newHours) || newHours < 0) {
-        showToast('Valor de horas inválido.', 'danger');
-        return;
-    }
-
-    // Se o dia estava concluído e as horas mudaram, desmarca a conclusão
-    if (dia.isConcluido && newHours !== dia.horas) {
-        dia.isConcluido = false;
-        semana.totalHorasConcluidas = semana.dias.reduce((sum, d) => sum + (d.isConcluido ? d.horas : 0), 0);
-    }
-
-    // Logica simples: Se o usuário estudou mais que o agendado, a matéria original recebe o excedente.
-    // Para simplificar, vamos apenas atualizar o total do dia.
-    // Uma implementação mais robusta envolveria distribuir o excedente entre as matérias do dia.
-    if (newHours !== dia.horas) {
-         showToast(`Horas atualizadas para ${newHours}h. (Atenção: A distribuição das matérias permanece a original)`, 'warning');
-         dia.horas = newHours;
-
-         // Recalcula o total de horas na semana
-         semana.totalHorasSemana = semana.dias.reduce((sum, d) => sum + d.horas, 0);
-    }
-
-
-    saveState();
-    renderCronogramaModule();
-}
-
-/**
- * Exibe a semana do cronograma especificada.
- * @param {number} weekNum - O número da semana a ser exibida.
- * @param {number} totalPages - Total de semanas.
- */
-function mostrarSemana(weekNum, totalPages) {
-    if (weekNum >= 1 && weekNum <= totalPages) {
-        document.getElementById('cronogramaContainer').dataset.currentWeek = weekNum;
-        document.getElementById('cronogramaContainer').innerHTML = renderCronogramaDisplay();
+function deleteFilter() {
+    const savedFiltersSelect = document.getElementById('savedFilters');
+    if (!savedFiltersSelect) return;
+    const name = savedFiltersSelect.value;
+    if (!name) return;
+    if (confirm(`Excluir o caderno "${name}"?`)) {
+        delete SAVED_FILTERS[name];
+        localStorage.setItem('BD_FILTROS', JSON.stringify(SAVED_FILTERS));
+        populateSavedFilters();
+        const btnDeleteFilter = document.getElementById('btnDeleteFilter');
+        if (btnDeleteFilter) btnDeleteFilter.style.display = 'none';
+        showToast('Caderno excluído.', 'info');
     }
 }
 
-/**
- * Reinicia o cronograma (remove matérias e o plano gerado).
- */
-function reiniciarCronograma() {
-    if (confirmAction('Tem certeza que deseja limpar todas as matérias e o cronograma gerado? Esta ação é irreversível.')) {
-        appState.cronograma = {
-            materias: [],
-            dataFim: null,
-            semanas: []
-        };
-        colorIndex = 0; // Reseta o índice de cores
-        saveState();
-        renderCronogramaModule();
-        showToast('Cronograma e matérias limpos!', 'success');
-    }
-}
+/* ---------------------------
+   Estatísticas
+----------------------------*/
+function showStats() {
+    const totalQuestions = BD.length;
+    let totalAttempts = 0;
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let uniqueAnswered = 0;
 
-/**
- * Inicia a importação de matérias a partir de um JSON.
- */
-function importarMaterias() {
-    const jsonString = prompt("Cole o JSON das matérias no formato:\n" +
-        "[{\"nome\":\"Português\", \"horasPorSemana\":5}, {\"nome\":\"Matemática\", \"horasPorSemana\":8}]");
+    const discMap = {};
 
-    if (jsonString === null) return;
+    BD.forEach(q => {
+        if (q.stats) {
+            const c = q.stats.correct || 0;
+            const w = q.stats.wrong || 0;
+            const t = c + w;
 
-    try {
-        const disciplinas = JSON.parse(jsonString);
-        processarDisciplinasImportadas(disciplinas);
-    } catch (e) {
-        showToast('Formato JSON inválido. Verifique o padrão e tente novamente.', 'danger');
-        console.error('Erro ao processar JSON de importação:', e);
-    }
-}
+            if (t > 0) {
+                uniqueAnswered++;
+                totalCorrect += c;
+                totalWrong += w;
+                totalAttempts += t;
 
-/**
- * Processa as matérias importadas.
- * @param {Array<object>} disciplinas - Array de objetos { nome, horasPorSemana }.
- */
-function processarDisciplinasImportadas(disciplinas) {
-    if (!Array.isArray(disciplinas)) {
-        showToast('O JSON deve ser um array de disciplinas.', 'danger');
-        return;
-    }
-
-    let importCount = 0;
-    disciplinas.forEach(disc => {
-        const nome = disc.nome ? disc.nome.trim() : null;
-        const horas = parseInt(disc.horasPorSemana);
-
-        if (nome && horas >= 1) {
-            // Verifica se já existe para evitar duplicatas
-            if (!appState.cronograma.materias.some(m => m.nome.toLowerCase() === nome.toLowerCase())) {
-                const newMateria = {
-                    nome: nome,
-                    horasPorSemana: horas,
-                    cor: colors[colorIndex % colors.length],
-                    progressoHoras: 0,
+                const disc = q.disciplina ? q.disciplina.trim() : 'Sem Disciplina';
+                if (!discMap[disc]) discMap[disc] = {
+                    correct: 0,
+                    wrong: 0
                 };
-                colorIndex++;
-                appState.cronograma.materias.push(newMateria);
-                importCount++;
+                discMap[disc].correct += c;
+                discMap[disc].wrong += w;
             }
         }
     });
 
-    if (importCount > 0) {
-        // Limpa o cronograma anterior e salva o estado
-        appState.cronograma.semanas = [];
-        saveState();
-        renderCronogramaModule();
-        showToast(`${importCount} matéria(s) importada(s) com sucesso! Gere o cronograma.`, 'success');
+    const accuracy = totalAttempts > 0 ? ((totalCorrect / totalAttempts) * 100).toFixed(1) : "0.0";
+    const bankProgress = totalQuestions > 0 ? ((uniqueAnswered / totalQuestions) * 100).toFixed(1) : "0.0";
+
+    let html = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Banco</h3>
+                <div class="value">${totalQuestions}</div>
+            </div>
+             <div class="stat-card">
+                <h3>Respondidas</h3>
+                <div class="value" title="${uniqueAnswered} questões únicas">${uniqueAnswered}</div>
+            </div>
+             <div class="stat-card success">
+                <h3>Acertos</h3>
+                <div class="value">${totalCorrect}</div>
+            </div>
+             <div class="stat-card danger">
+                <h3>Erros</h3>
+                <div class="value">${totalWrong}</div>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <span style="font-weight:bold; color:var(--text-primary)">Taxa de Acerto: ${accuracy}%</span>
+            <span style="font-size:0.9rem; color:var(--text-muted)">Progresso do Banco: ${bankProgress}%</span>
+        </div>
+        <div style="background: var(--border); height: 12px; border-radius: 6px; overflow: hidden; display:flex; margin-bottom: 5px;">
+            <div style="width: ${accuracy}%; background: var(--success); height: 100%;" title="Acertos"></div>
+            <div style="width: ${100 - accuracy}%; background: var(--danger); height: 100%;" title="Erros"></div>
+        </div>
+    `;
+
+    html += `<h3 class="stat-section-title">Desempenho por Disciplina</h3>`;
+    const discArray = Object.keys(discMap).map(key => ({
+        name: key,
+        ...discMap[key],
+        total: discMap[key].correct + discMap[key].wrong
+    })).sort((a, b) => b.total - a.total);
+
+    if (discArray.length === 0) {
+        html += `<p style="text-align:center; color:var(--text-muted); padding: 20px;">Nenhuma questão respondida ainda.</p>`;
     } else {
-        showToast('Nenhuma nova matéria válida foi encontrada para importação.', 'info');
+        html += `<div class="stat-table-container"><table class="stat-table">
+            <thead>
+                <tr>
+                    <th>Disciplina</th>
+                    <th>Resoluções</th>
+                    <th>C / E</th>
+                    <th>% Acerto</th>
+                </tr>
+            </thead>
+            <tbody>`;
+        discArray.forEach(d => {
+            const discAcc = ((d.correct / d.total) * 100).toFixed(0);
+            const colorBar = discAcc >= 70 ? 'var(--success)' : (discAcc >= 40 ? 'var(--warning)' : 'var(--danger)');
+            html += `<tr>
+                    <td>${escapeHtml(d.name)}</td>
+                    <td style="text-align:center;">${d.total}</td>
+                    <td><span style="color:var(--success); font-weight:bold;">${d.correct}</span> / <span style="color:var(--danger); font-weight:bold;">${d.wrong}</span></td>
+                    <td>
+                        <div style="display:flex; align-items:center;">
+                            <div class="mini-progress-track">
+                                <div class="mini-progress-fill" style="width:${discAcc}%; background: ${colorBar};"></div>
+                            </div>
+                            <span>${discAcc}%</span>
+                        </div>
+                    </td>
+                </tr>`;
+        });
+        html += `</tbody></table></div>`;
+    }
+
+    const statsBody = document.getElementById('statsBody');
+    if (statsBody) statsBody.innerHTML = html;
+}
+
+/* ---------------------------
+   Export/Import
+----------------------------*/
+function exportDB() {
+    const backup = {
+        questoes: BD,
+        flashcards: BD_FC
+    };
+    const dataStr = JSON.stringify(backup, null, 2);
+    const link = document.createElement('a');
+    link.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+    link.download = `backup_completo_${new Date().toISOString().slice(0,10)}.json`;
+    link.click();
+    localStorage.setItem('LAST_BACKUP_DATE', new Date().toLocaleDateString('pt-BR'));
+    showToast('Backup exportado com sucesso!', 'success');
+}
+
+function importDB() {
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) fileInput.click();
+}
+
+function clearDB() {
+    if (confirm('ATENÇÃO: Isso apagará TODAS as questões e flashcards. Confirmar?')) {
+        BD = [];
+        BD_FC = [];
+        saveBD();
+        saveBD_FC();
+        updateFilterOptions();
+        updateFCFilters();
+        renderQuestions();
+        renderFlashcardsList();
+        showToast('Todos os dados foram limpos!', 'info');
     }
 }
 
+/* ---------------------------
+   CRONOGRAMA (Funções Principais)
+----------------------------*/
+function initCronograma() {
+    console.log("Inicializando cronograma...");
 
-// --- MÓDULO AJUDA & CONFIGURAÇÕES GERAIS ---
+    // Configura data mínima como hoje
+    const hoje = new Date().toISOString().split('T')[0];
+    const dataProvaInput = document.getElementById('dataProva');
+    if (dataProvaInput) {
+        dataProvaInput.min = hoje;
+        console.log("Data mínima configurada:", hoje);
+    }
 
-/**
- * Renderiza a interface de ajuda e configurações.
- */
-function renderAjudaModule() {
-    headerTitle.textContent = 'Ajuda & Configurações';
+    // Carrega matérias salvas
+    renderizarMateriasCronograma();
 
-    // Data de meta diária atual
-    const goalValue = appState.dailyGoal;
+    // Tenta carregar cronograma existente
+    try {
+        const cronogramaSalvo = localStorage.getItem('BD_CRONOGRAMA');
+        console.log("Cronograma salvo encontrado:", cronogramaSalvo);
 
-    mainContent.innerHTML = `
-        <section class="module-help">
-            <h2 class="section-title">Configurações Gerais</h2>
+        if (cronogramaSalvo && cronogramaSalvo !== 'null' && cronogramaSalvo !== 'undefined') {
+            const parsed = JSON.parse(cronogramaSalvo);
+            if (parsed && parsed.dataProva) {
+                CRONOGRAMA_DATA = parsed;
+                console.log("Cronograma carregado:", CRONOGRAMA_DATA);
+                exibirCronograma(CRONOGRAMA_DATA);
+                return;
+            }
+        }
+        // Se não há cronograma, mostra o setup
+        mostrarSetupCronograma();
+    } catch (e) {
+        console.error('Erro ao carregar cronograma:', e);
+        mostrarSetupCronograma();
+    }
 
-            <div class="config-section card">
-                <h3>Meta Diária de Estudo</h3>
-                <p>Defina o número de perguntas/flashcards que você deseja revisar por dia.</p>
-                <div class="config-control">
-                    <input type="number" id="dailyGoalInput" value="${goalValue}" min="1">
-                    <button class="btn primary" onclick="updateDailyGoalTarget(document.getElementById('dailyGoalInput').value)">
-                        <i class="fas fa-save"></i> Salvar Meta
-                    </button>
-                </div>
-            </div>
-
-            <div class="config-section card">
-                <h3>Gerenciamento de Dados</h3>
-                <p>Exporte seus dados para backup ou importe um arquivo existente.</p>
-                <div class="config-actions">
-                    <button class="btn info" onclick="exportDB()">
-                        <i class="fas fa-file-export"></i> Exportar Dados (JSON)
-                    </button>
-                    <button class="btn warning" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-file-import"></i> Importar Dados (JSON)
-                    </button>
-                    <button class="btn danger" onclick="clearDB()">
-                        <i class="fas fa-exclamation-triangle"></i> Limpar TODOS os Dados
-                    </button>
-                </div>
-            </div>
-
-            <div class="config-section card">
-                <h3>Guia Rápido de Uso</h3>
-                <div class="help-grid">
-                    <div class="help-section">
-                        <h4><i class="fas fa-question-circle"></i> Gerenciador de Perguntas</h4>
-                        <ul>
-                            <li>Cadastre suas perguntas de múltipla escolha.</li>
-                            <li>Use a funcionalidade "Iniciar Treino" para revisar de forma otimizada.</li>
-                            <li>A taxa de acertos consecutivos (no cartão) determina se a questão está em Revisão (&lt;3) ou Dominada (>=3).</li>
-                        </ul>
-                    </div>
-
-                    <div class="help-section">
-                        <h4><i class="fas fa-layer-group"></i> Flashcards e SRS</h4>
-                        <ul>
-                            <li>O sistema usa o <a href="https://en.wikipedia.org/wiki/Spaced_repetition" target="_blank">SRS (Spaced Repetition System)</a> para agendar a próxima revisão.</li>
-                            <li>Responda "Difícil (1)", "Médio (2)", ou "Fácil (3)" para atualizar o intervalo de revisão.</li>
-                            <li>O estudo prioriza cards com a data de "Próxima Revisão" vencida.</li>
-                        </ul>
-                    </div>
-
-                    <div class="help-section">
-                        <h4><i class="fas fa-calendar-alt"></i> Cronograma</h4>
-                        <ul>
-                            <li>Defina a Data Limite da Prova e adicione suas matérias com as horas semanais.</li>
-                            <li>A função "Gerar Cronograma" distribui o tempo de estudo pelas semanas até a data final.</li>
-                            <li>Acompanhe seu progresso diário e semanal marcando os dias como concluídos.</li>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-             <p class="app-version">MindForge v9.2 - Correção PWA | Por: Walker Dias</p>
-        </section>
-    `;
-    // Adiciona listener de importação
-    document.getElementById('fileInput').addEventListener('change', importDB);
+    // Toggle do cronograma
+    const btnToggle = document.getElementById('btnToggleCronograma');
+    if (btnToggle) {
+        btnToggle.addEventListener('click', toggleCronograma);
+    }
 }
 
-// --- GESTÃO DE DADOS (IMPORTAÇÃO/EXPORTAÇÃO) ---
+function mostrarSetupCronograma() {
+    const setup = document.getElementById('cronogramaSetup');
+    const view = document.getElementById('cronogramaView');
+    console.log("Mostrando setup do cronograma");
 
-/**
- * Exporta todo o estado da aplicação como um arquivo JSON.
- */
-function exportDB() {
-    const exportData = {
-        quizData: appState.quizData,
-        flashcardData: appState.flashcardData,
-        stats: appState.stats,
-        dailyGoal: appState.dailyGoal,
-        cronograma: appState.cronograma,
-        settings: appState.settings
-    };
-
-    const jsonString = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mindforge_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Dados exportados com sucesso!', 'success');
+    if (setup) setup.style.display = 'block';
+    if (view) view.style.display = 'none';
 }
 
-/**
- * Importa dados de um arquivo JSON.
- * @param {Event} event - Evento de mudança do input file.
- */
-function importDB(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+function toggleCronograma() {
+    const content = document.getElementById('cronogramaContent');
+    const btn = document.getElementById('btnToggleCronograma');
 
-    if (!confirmAction('A importação substituirá TODOS os dados atuais (Perguntas, Flashcards, Estatísticas). Deseja continuar?')) {
-        // Limpa o valor do input para permitir nova seleção
-        event.target.value = null;
+    if (!content) {
+        console.error("Elemento cronogramaContent não encontrado");
         return;
     }
 
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const importedData = JSON.parse(e.target.result);
-
-            if (importedData.quizData) appState.quizData = importedData.quizData;
-            if (importedData.flashcardData) appState.flashcardData = importedData.flashcardData;
-            if (importedData.stats) appState.stats = importedData.stats;
-            if (importedData.dailyGoal) appState.dailyGoal = parseInt(importedData.dailyGoal);
-            if (importedData.cronograma) {
-                 // Converte a dataFim de volta para objeto Date
-                 if (importedData.cronograma.dataFim) {
-                    importedData.cronograma.dataFim = new Date(importedData.cronograma.dataFim);
-                 }
-                appState.cronograma = importedData.cronograma;
-            }
-            if (importedData.settings) appState.settings = importedData.settings;
-
-            appState.totalQuestions = appState.quizData.length;
-            saveState();
-            updateUI();
-            showToast('Dados importados com sucesso! Verifique a tela inicial.', 'success');
-        } catch (error) {
-            showToast('Erro ao processar o arquivo JSON. Certifique-se de que o formato está correto.', 'danger');
-            console.error('Erro na importação:', error);
-        } finally {
-            // Limpa o valor do input para permitir nova seleção
-            event.target.value = null;
-        }
-    };
-    reader.onerror = () => {
-        showToast('Não foi possível ler o arquivo.', 'danger');
-         // Limpa o valor do input para permitir nova seleção
-        event.target.value = null;
-    };
-    reader.readAsText(file);
-}
-
-/**
- * Limpa todos os dados salvos no localStorage.
- */
-function clearDB() {
-    if (confirmAction('ATENÇÃO: Você tem certeza que deseja APAGAR TODOS os seus dados salvos? Esta ação é irreversível.')) {
-        localStorage.clear();
-        window.location.reload(); // Recarrega a aplicação
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        if (btn) btn.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        if (btn) btn.textContent = '▶';
     }
 }
 
-// --- FUNÇÕES AUXILIARES ---
+function reiniciarCronograma() {
+    if (!confirm('Isso irá apagar o cronograma atual. Continuar?')) return;
 
-/**
- * Obtém tags únicas de uma lista de objetos.
- * @param {Array<object>} data - Array de perguntas ou flashcards.
- * @returns {Array<string>} - Array de tags únicas.
- */
-function getUniqueTags(data) {
-    const tags = new Set();
-    data.forEach(item => {
-        (item.tags || []).forEach(tag => tags.add(tag.toLowerCase()));
+    CRONOGRAMA_DATA = null;
+    localStorage.removeItem('BD_CRONOGRAMA');
+
+    mostrarSetupCronograma();
+    document.getElementById('listaMateriasCronograma').innerHTML = '';
+    MATERIAS_CRONOGRAMA = [];
+    localStorage.setItem('BD_MATERIAS', JSON.stringify(MATERIAS_CRONOGRAMA));
+    atualizarContadorMaterias();
+
+    showToast('Cronograma reiniciado!', 'info');
+}
+
+function initNavegacaoCronograma() {
+    console.log("Navegação do cronograma inicializada");
+}
+
+function atualizarContadorMaterias() {
+    const countElement = document.getElementById('materiasCount');
+    if (countElement) {
+        countElement.textContent = `${MATERIAS_CRONOGRAMA.length} matérias`;
+    }
+}
+
+function renderizarMateriasCronograma() {
+    const container = document.getElementById('listaMateriasCronograma');
+    if (!container) return;
+
+    if (MATERIAS_CRONOGRAMA.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="text-align: center; padding: 30px; color: var(--text-muted);">📚 Nenhuma matéria adicionada</div>';
+    } else {
+        container.innerHTML = MATERIAS_CRONOGRAMA.map((materia, index) => `
+            <div class="materia-item" id="materia-${index}">
+                <span>📚 ${escapeHtml(materia)}</span>
+                <button onclick="removerMateria(${index})" class="btn-icon" style="color: var(--danger); background: none; border: none; font-size: 1.2rem; cursor: pointer;" title="Remover matéria">×</button>
+            </div>
+        `).join('');
+    }
+
+    atualizarContadorMaterias();
+}
+
+function importarMaterias() {
+    // Extrai disciplinas únicas do banco de questões
+    const disciplinas = [...new Set(BD.map(q => q.disciplina).filter(d => d && d.trim() !== ''))];
+
+    if (disciplinas.length === 0) {
+        showToast('Nenhuma disciplina encontrada no banco de questões!', 'error');
+        return;
+    }
+
+    // Cria modal para seleção de disciplinas
+    const modal = document.createElement('dialog');
+    modal.className = 'modal';
+    modal.id = 'importarMateriasModal';
+
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📥 Importar Disciplinas do Banco</h3>
+                <button onclick="this.closest('dialog').close()" class="btn secondary">×</button>
+            </div>
+            <p style="margin-bottom: 15px; color: var(--text-muted);">
+                Selecione as disciplinas que deseja importar do banco de questões:
+            </p>
+            <div class="disciplinas-list" style="max-height: 300px; overflow-y: auto; margin-bottom: 20px;">
+                ${disciplinas.map((disciplina, index) => `
+                    <label class="disciplina-checkbox" style="display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; cursor: pointer; transition: background 0.2s;">
+                        <input type="checkbox" value="${escapeHtml(disciplina)}" ${MATERIAS_CRONOGRAMA.includes(disciplina) ? 'disabled' : ''} 
+                               style="margin: 0;" onchange="toggleDisciplinaSelection(this)">
+                        <span style="flex: 1; ${MATERIAS_CRONOGRAMA.includes(disciplina) ? 'opacity: 0.6;' : ''}">
+                            📚 ${escapeHtml(disciplina)}
+                        </span>
+                        ${MATERIAS_CRONOGRAMA.includes(disciplina) ? 
+                          '<span style="color: var(--text-muted); font-size: 0.8rem;">(já adicionada)</span>' : ''}
+                    </label>
+                `).join('')}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span id="contadorSelecionadas" style="font-size: 0.9rem; color: var(--text-muted);">
+                    0 disciplinas selecionadas
+                </span>
+                <button type="button" onclick="selecionarTodasDisciplinas()" class="btn secondary" style="padding: 5px 10px; font-size: 0.8rem;">
+                    Selecionar Todas
+                </button>
+            </div>
+            <div class="modal-actions">
+                <button onclick="processarDisciplinasImportadas()" class="btn primary" id="btnImportarDisciplinas" disabled>
+                    Importar Selecionadas
+                </button>
+                <button onclick="this.closest('dialog').close()" class="btn secondary">Cancelar</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.showModal();
+
+    // Atualiza contador inicial
+    atualizarContadorSelecionadas();
+}
+
+function toggleDisciplinaSelection(checkbox) {
+    const label = checkbox.closest('.disciplina-checkbox');
+    if (checkbox.checked) {
+        label.style.background = 'var(--accent-light)';
+        label.style.borderColor = 'var(--accent)';
+    } else {
+        label.style.background = '';
+        label.style.borderColor = 'var(--border)';
+    }
+    atualizarContadorSelecionadas();
+}
+
+function selecionarTodasDisciplinas() {
+    const checkboxes = document.querySelectorAll('#importarMateriasModal input[type="checkbox"]:not(:disabled)');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+        toggleDisciplinaSelection(checkbox);
     });
-    return Array.from(tags).sort();
 }
 
-/**
- * Gera uma cor determinística a partir de uma string.
- * @param {string} str - String de entrada (ex: nome da disciplina).
- * @returns {string} - Cor em formato hexadecimal.
- */
-function stringToColor(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    let color = '#';
-    for (let i = 0; i < 3; i++) {
-        const value = (hash >> (i * 8)) & 0xFF;
-        color += ('00' + value.toString(16)).substr(-2);
-    }
-    return color;
-}
+function atualizarContadorSelecionadas() {
+    const checkboxes = document.querySelectorAll('#importarMateriasModal input[type="checkbox"]:not(:disabled)');
+    const selecionadas = Array.from(checkboxes).filter(cb => cb.checked).length;
+    const total = checkboxes.length;
 
-/**
- * Funções para seleção de tags nos formulários.
- * @param {string} tag - A tag selecionada.
- */
-function selectTag(tag) {
-    const tagsInput = document.getElementById('tags');
-    if (!tagsInput) return;
-    const currentTags = tagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-    if (!currentTags.includes(tag)) {
-        tagsInput.value = currentTags.length > 0 ? currentTags.join(', ') + `, ${tag}` : tag;
+    const contador = document.getElementById('contadorSelecionadas');
+    const btnImportar = document.getElementById('btnImportarDisciplinas');
+
+    if (contador) {
+        contador.textContent = `${selecionadas} de ${total} disciplinas selecionadas`;
+    }
+
+    if (btnImportar) {
+        btnImportar.disabled = selecionadas === 0;
     }
 }
 
-function selectTagFc(tag) {
-    const tagsInput = document.getElementById('tags_fc');
-    if (!tagsInput) return;
-    const currentTags = tagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-    if (!currentTags.includes(tag)) {
-        tagsInput.value = currentTags.length > 0 ? currentTags.join(', ') + `, ${tag}` : tag;
+function processarDisciplinasImportadas() {
+    const modal = document.getElementById('importarMateriasModal');
+    const checkboxes = document.querySelectorAll('#importarMateriasModal input[type="checkbox"]:checked');
+
+    if (checkboxes.length === 0) {
+        showToast('Selecione pelo menos uma disciplina!', 'error');
+        return;
+    }
+
+    const novasDisciplinas = Array.from(checkboxes).map(cb => cb.value);
+    let adicionadas = 0;
+
+    novasDisciplinas.forEach(disciplina => {
+        if (!MATERIAS_CRONOGRAMA.includes(disciplina)) {
+            MATERIAS_CRONOGRAMA.push(disciplina);
+            adicionadas++;
+        }
+    });
+
+    if (adicionadas > 0) {
+        localStorage.setItem('BD_MATERIAS', JSON.stringify(MATERIAS_CRONOGRAMA));
+        renderizarMateriasCronograma();
+        showToast(`${adicionadas} disciplina(s) importada(s) com sucesso!`, 'success');
+    } else {
+        showToast('Todas as disciplinas selecionadas já estão no cronograma!', 'info');
+    }
+
+    if (modal) {
+        modal.close();
+        modal.remove();
     }
 }
 
-// --- INICIALIZAÇÃO ---
+function adicionarMateriaCronograma() {
+    const input = document.getElementById('novaMateria');
+    const materia = input.value.trim();
 
-/**
- * Inicializa a aplicação.
- */
+    if (!materia) {
+        showToast('Digite o nome da matéria!', 'error');
+        return;
+    }
+
+    if (MATERIAS_CRONOGRAMA.includes(materia)) {
+        showToast('Matéria já adicionada!', 'error');
+        return;
+    }
+
+    MATERIAS_CRONOGRAMA.push(materia);
+    localStorage.setItem('BD_MATERIAS', JSON.stringify(MATERIAS_CRONOGRAMA));
+    renderizarMateriasCronograma();
+
+    input.value = '';
+    showToast(`Matéria "${materia}" adicionada!`, 'success');
+}
+
+function removerMateria(index) {
+    MATERIAS_CRONOGRAMA.splice(index, 1);
+    localStorage.setItem('BD_MATERIAS', JSON.stringify(MATERIAS_CRONOGRAMA));
+    renderizarMateriasCronograma();
+}
+
+function gerarCronograma() {
+    const dataProva = document.getElementById('dataProva').value;
+    const diasSemana = parseInt(document.getElementById('diasSemana').value);
+    const horasDia = parseInt(document.getElementById('horasDia').value);
+
+    if (!dataProva) {
+        showToast('Selecione a data da prova!', 'error');
+        return;
+    }
+
+    if (MATERIAS_CRONOGRAMA.length === 0) {
+        showToast('Adicione pelo menos uma matéria!', 'error');
+        return;
+    }
+
+    // Calcula dias até a prova
+    const hoje = new Date();
+    const provaDate = new Date(dataProva);
+    const diffTime = provaDate - hoje;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) {
+        showToast('Data da prova deve ser futura!', 'error');
+        return;
+    }
+
+    // Calcula totais
+    const totalDiasEstudo = Math.floor((diffDays - 7) * (diasSemana / 7));
+    const totalHoras = totalDiasEstudo * horasDia;
+    const horasPorMateria = Math.floor(totalHoras / MATERIAS_CRONOGRAMA.length);
+
+    // Gera estrutura do cronograma
+    const cronograma = {
+        dataGeracao: new Date().toISOString(),
+        dataProva: dataProva,
+        diasSemana: diasSemana,
+        horasDia: horasDia,
+        totalDias: diffDays,
+        totalDiasEstudo: totalDiasEstudo,
+        totalHoras: totalHoras,
+        semanas: [],
+        materias: MATERIAS_CRONOGRAMA.map(materia => ({
+            nome: materia,
+            horasAlocadas: horasPorMateria,
+            horasEstudadas: 0,
+            concluida: false
+        }))
+    };
+
+    // Distribui as matérias pelas semanas
+    distribuirMateriasPorSemana(cronograma);
+
+    // Salva e exibe
+    CRONOGRAMA_DATA = cronograma;
+    localStorage.setItem('BD_CRONOGRAMA', JSON.stringify(cronograma));
+    exibirCronograma(cronograma);
+    showToast('Cronograma gerado e salvo com sucesso! 🎯', 'success');
+}
+
+function distribuirMateriasPorSemana(cronograma) {
+    const {
+        totalDiasEstudo,
+        diasSemana,
+        materias
+    } = cronograma;
+    const totalSemanas = Math.ceil(totalDiasEstudo / diasSemana);
+
+    cronograma.semanas = [];
+
+    for (let semana = 1; semana <= totalSemanas; semana++) {
+        const semanaData = {
+            numero: semana,
+            dias: []
+        };
+
+        // Distribui matérias igualmente (round-robin)
+        for (let dia = 1; dia <= diasSemana; dia++) {
+            const materiaIndex = (dia + semana) % materias.length;
+            const materia = materias[materiaIndex];
+
+            semanaData.dias.push({
+                dia: dia,
+                materia: materia.nome,
+                concluido: false,
+                horasEstudadas: 0
+            });
+        }
+
+        cronograma.semanas.push(semanaData);
+    }
+
+    // Última semana é revisão geral
+    if (totalSemanas > 1) {
+        const revisaoSemana = {
+            numero: totalSemanas,
+            dias: [],
+            isRevisao: true
+        };
+
+        for (let dia = 1; dia <= diasSemana; dia++) {
+            revisaoSemana.dias.push({
+                dia: dia,
+                materia: "REVISÃO GERAL",
+                concluido: false,
+                horasEstudadas: 0,
+                isRevisao: true
+            });
+        }
+
+        cronograma.semanas[cronograma.semanas.length - 1] = revisaoSemana;
+    }
+}
+
+function exibirCronograma(cronograma) {
+    const setup = document.getElementById('cronogramaSetup');
+    const view = document.getElementById('cronogramaView');
+
+    if (!setup || !view) return;
+
+    setup.style.display = 'none';
+    view.style.display = 'block';
+
+    const resumo = document.getElementById('resumoCronograma');
+    const tabs = document.getElementById('tabsSemanas');
+    const conteudo = document.getElementById('conteudoCronograma');
+
+    // Atualiza resumo
+    if (resumo && cronograma.dataProva) {
+        const progresso = calcularProgressoCronograma(cronograma);
+        resumo.innerHTML = `
+            <strong>🎯 Meta:</strong> ${cronograma.dataProva} 
+            | <strong>📅 Dias:</strong> ${cronograma.totalDiasEstudo} dias de estudo 
+            | <strong>⏱️ Total:</strong> ${cronograma.totalHoras}h
+            | <strong>📊 Progresso:</strong> ${progresso}%
+        `;
+    }
+
+    // Gera tabs das semanas
+    if (tabs && cronograma.semanas) {
+        tabs.innerHTML = cronograma.semanas.map(semana => `
+            <button class="btn secondary tab-semana ${semana.numero === 1 ? 'active' : ''}" 
+                    onclick="mostrarSemana(${semana.numero})">
+                Semana ${semana.numero}
+            </button>
+        `).join('');
+    }
+
+    // Gera conteúdo das semanas
+    if (conteudo && cronograma.semanas) {
+        conteudo.innerHTML = cronograma.semanas.map(semana => `
+            <div id="semana-${semana.numero}" class="semana-conteudo" style="display: ${semana.numero === 1 ? 'block' : 'none'};">
+                <h5 style="margin: 15px 0 10px 0; color: var(--accent);">
+                    ${semana.isRevisao ? '🔄 REVISÃO GERAL' : '📚 Estudos'} - Semana ${semana.numero}
+                </h5>
+                <div class="dias-semana">
+                    ${semana.dias.map(dia => `
+                        <div class="dia-cronograma ${dia.concluido ? 'concluido' : ''}">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span><strong>Dia ${dia.dia}:</strong> ${escapeHtml(dia.materia)}</span>
+                                <button onclick="marcarDiaConcluido(${semana.numero}, ${dia.dia})" 
+                                        class="btn secondary" 
+                                        style="padding: 5px 10px; font-size: 0.8rem; min-width: 80px;">
+                                    ${dia.concluido ? '✅ Concluído' : '⏳ Em andamento'}
+                                </button>
+                            </div>
+                            <div class="meta" style="display: flex; align-items: center; gap: 10px;">
+                                <span>Horas estudadas:</span>
+                                <input type="number" 
+                                       min="0" 
+                                       max="12" 
+                                       step="0.5"
+                                       value="${dia.horasEstudadas}" 
+                                       onchange="atualizarHorasDia(${semana.numero}, ${dia.dia}, this.value)"
+                                       onfocus="event.stopPropagation()"
+                                       onclick="event.stopPropagation()"
+                                       style="width: 70px; padding: 5px; border-radius: 4px; border: 1px solid var(--border);">
+                                <span>h</span>
+                                <small style="color: var(--text-muted); margin-left: auto;">
+                                    ${dia.horasEstudadas > 0 ? `${dia.horasEstudadas}h registradas` : 'Sem horas registradas'}
+                                </small>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+function calcularProgressoCronograma(cronograma) {
+    if (!cronograma.semanas.length) return 0;
+
+    let totalDias = 0;
+    let diasConcluidos = 0;
+
+    cronograma.semanas.forEach(semana => {
+        semana.dias.forEach(dia => {
+            totalDias++;
+            if (dia.concluido) diasConcluidos++;
+        });
+    });
+
+    return Math.round((diasConcluidos / totalDias) * 100);
+}
+
+function mostrarSemana(numeroSemana) {
+    // Esconde todas as semanas
+    document.querySelectorAll('.semana-conteudo').forEach(semana => {
+        semana.style.display = 'none';
+    });
+
+    // Remove active de todas as tabs
+    document.querySelectorAll('.tab-semana').forEach(tab => {
+        tab.classList.remove('active');
+    });
+
+    // Mostra semana selecionada
+    const semanaEl = document.getElementById(`semana-${numeroSemana}`);
+    if (semanaEl) {
+        semanaEl.style.display = 'block';
+    }
+
+    // Ativa tab selecionada
+    const tabEl = document.querySelector(`.tab-semana:nth-child(${numeroSemana})`);
+    if (tabEl) {
+        tabEl.classList.add('active');
+    }
+}
+
+function marcarDiaConcluido(numeroSemana, numeroDia) {
+    if (!CRONOGRAMA_DATA) return;
+
+    const semana = CRONOGRAMA_DATA.semanas.find(s => s.numero === numeroSemana);
+    if (!semana) return;
+
+    const dia = semana.dias.find(d => d.dia === numeroDia);
+    if (!dia) return;
+
+    dia.concluido = !dia.concluido;
+    localStorage.setItem('BD_CRONOGRAMA', JSON.stringify(CRONOGRAMA_DATA));
+
+    // Atualiza a exibição
+    exibirCronograma(CRONOGRAMA_DATA);
+    showToast(dia.concluido ? 'Dia marcado como concluído! ✅' : 'Dia reaberto para estudo', 'success');
+}
+
+function atualizarHorasDia(numeroSemana, numeroDia, horas) {
+    if (!CRONOGRAMA_DATA) return;
+
+    const semana = CRONOGRAMA_DATA.semanas.find(s => s.numero === numeroSemana);
+    if (!semana) return;
+
+    const dia = semana.dias.find(d => d.dia === numeroDia);
+    if (!dia) return;
+
+    dia.horasEstudadas = parseInt(horas) || 0;
+    localStorage.setItem('BD_CRONOGRAMA', JSON.stringify(CRONOGRAMA_DATA));
+}
+
+/* ---------------------------
+   Inicialização Principal
+----------------------------*/
 function init() {
-    loadState();
-    initConnectivity(); // Inicializa a verificação de conectividade
-    updateUI();
+    loadTheme(); // 1. Tema
+    initConnectivity(); // 2. Conectividade (NOVO)
+    checkPWAStatus(); // 3. Verificação PWA (NOVO)
+
+    // 4. Sistema existente
+    initDailyGoal();
+    populateSavedFilters();
+    migrateOldQuestions();
+    updateFilterOptions();
+
+    // Inicializa menu mobile
+    initMobileMenu();
+
+    // Inicializa dashboard
+    initDashboard();
+
+    // Inicializa cronograma
+    setTimeout(() => {
+        initCronograma();
+    }, 100);
+
+    // ADICIONAR: Inicializa filtros de flashcards se for o módulo atual
+    const lastModule = localStorage.getItem('LAST_MODULE') || 'dashboard';
+    if (lastModule === 'flashcards') {
+        setTimeout(() => {
+            updateFCFilters();
+        }, 200);
+    }
+
+    // Carrega o último módulo visitado ou o dashboard
+    switchModule(lastModule);
+
+    // Event Listeners para navegação
+    document.querySelectorAll('.nav-item[data-module]').forEach(item => {
+        item.addEventListener('click', function() {
+            switchModule(this.dataset.module);
+        });
+    });
+
+    // Event Listener para tema na sidebar
+    const themeToggleSidebar = document.getElementById('themeToggleSidebar');
+    if (themeToggleSidebar) {
+        themeToggleSidebar.addEventListener('click', toggleTheme);
+    }
+
+    // Configura event listeners existentes
+    setupEventListeners();
+
+    // Ajusta visibilidade do toggle mobile baseado no tamanho da tela
+    function checkMobileMenu() {
+        const mobileToggle = document.getElementById('mobileMenuToggle');
+        if (mobileToggle) {
+            mobileToggle.style.display = window.innerWidth <= 1024 ? 'block' : 'none';
+        }
+    }
+
+    window.addEventListener('resize', checkMobileMenu);
+    checkMobileMenu();
+
+    console.log('🧠 MindForge inicializado com suporte offline');
+}
+
+function setupEventListeners() {
+    // Questões
+    const btnNovoQuestao = document.getElementById('btnNovoQuestao');
+    const btnQuizQuestao = document.getElementById('btnQuizQuestao');
+    const btnExportQuestao = document.getElementById('btnExportQuestao');
+    const btnImportQuestao = document.getElementById('btnImportQuestao');
+
+    if (btnNovoQuestao) btnNovoQuestao.addEventListener('click', abrirFormulario);
+    if (btnQuizQuestao) btnQuizQuestao.addEventListener('click', initQuiz);
+    if (btnExportQuestao) btnExportQuestao.addEventListener('click', exportDB);
+    if (btnImportQuestao) btnImportQuestao.addEventListener('click', importDB);
+
+    // Flashcards
+    const btnNovoFC = document.getElementById('btnNovoFC');
+    const btnQuizFC = document.getElementById('btnQuizFC');
+
+    if (btnNovoFC) btnNovoFC.addEventListener('click', openFCForm);
+    if (btnQuizFC) btnQuizFC.addEventListener('click', startFlashcardStudy);
+
+    // Formulários
+    const form = document.getElementById('form');
+    const formFC = document.getElementById('formFC');
+    const btnSalvar = document.getElementById('btnSalvar');
+    const btnCancelar = document.getElementById('btnCancelar');
+    const btnCancelarFC = document.getElementById('btnCancelarFC');
+
+    if (form) form.addEventListener('submit', saveQuestion);
+    if (formFC) formFC.addEventListener('submit', saveFC);
+    if (btnSalvar) btnSalvar.addEventListener('click', saveQuestion);
+    if (btnCancelar) btnCancelar.addEventListener('click', fecharFormulario);
+    if (btnCancelarFC) btnCancelarFC.addEventListener('click', () => {
+        const formCardFC = document.getElementById('formCardFC');
+        if (formCardFC) formCardFC.style.display = 'none';
+    });
+
+    // Filtros
+    const fSearch = document.getElementById('fSearch');
+    const fDificuldade = document.getElementById('fDificuldade');
+    const fQtdTreino = document.getElementById('fQtdTreino');
+    const fcSearch = document.getElementById('fcSearch');
+    const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
+
+    if (fSearch) fSearch.addEventListener('input', () => {
+        currentPage = 1;
+        renderQuestions();
+    });
+    if (fDificuldade) fDificuldade.addEventListener('change', onFilterChange);
+    if (fQtdTreino) fQtdTreino.addEventListener('change', onFilterChange);
+    if (fcSearch) fcSearch.addEventListener('input', renderFlashcardsList);
+    if (fcDisciplinaFilter) {
+        fcDisciplinaFilter.addEventListener('change', () => {
+            console.log("Disciplina filter changed:", fcDisciplinaFilter.value);
+            updateFCAssuntoOptions();
+            renderFlashcardsList();
+        });
+    }
+
+    if (fcAssuntoFilter) {
+        fcAssuntoFilter.addEventListener('change', () => {
+            console.log("Assunto filter changed:", fcAssuntoFilter.value);
+            renderFlashcardsList();
+        });
+    }
+
+    // Paginação
+    const btnPrevPage = document.getElementById('btnPrevPage');
+    const btnNextPage = document.getElementById('btnNextPage');
+
+    if (btnPrevPage) btnPrevPage.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderQuestions();
+            const lista = document.getElementById('lista');
+            if (lista) lista.scrollTop = 0;
+        }
+    });
+
+    if (btnNextPage) btnNextPage.addEventListener('click', () => {
+        currentPage++;
+        renderQuestions();
+        const lista = document.getElementById('lista');
+        if (lista) lista.scrollTop = 0;
+    });
+
+    // Cadernos
+    const btnSaveFilter = document.getElementById('btnSaveFilter');
+    const savedFiltersSelect = document.getElementById('savedFilters');
+    const btnDeleteFilter = document.getElementById('btnDeleteFilter');
+
+    if (btnSaveFilter) btnSaveFilter.addEventListener('click', saveCurrentFilter);
+    if (savedFiltersSelect) savedFiltersSelect.addEventListener('change', loadSavedFilter);
+    if (btnDeleteFilter) btnDeleteFilter.addEventListener('click', deleteFilter);
+
+    // Flashcard player
+    const fcCardElement = document.getElementById('fcCardElement');
+    const btnFcFlip = document.getElementById('btnFcFlip');
+    const btnFcNext = document.getElementById('btnFcNext');
+    const btnFcPrev = document.getElementById('btnFcPrev');
+    const btnFcExit = document.getElementById('btnFcExit');
+
+    if (fcCardElement) fcCardElement.addEventListener('click', flipCard);
+    if (btnFcFlip) btnFcFlip.addEventListener('click', flipCard);
+    if (btnFcNext) btnFcNext.addEventListener('click', (e) => {
+        e.stopPropagation();
+        nextCard();
+    });
+    if (btnFcPrev) btnFcPrev.addEventListener('click', (e) => {
+        e.stopPropagation();
+        prevCard();
+    });
+    if (btnFcExit) btnFcExit.addEventListener('click', exitFlashcardStudy);
+
+    // Filtros cascata para questões
+    questionFiltersConfig.forEach(cfg => {
+        if (cfg.el) {
+            cfg.el.onchange = () => {
+                updateFilterOptions();
+                currentPage = 1;
+                renderQuestions();
+            };
+        }
+    });
+
+    // Checkbox de revisão
+    const fRevisao = document.getElementById('fRevisao');
+    if (fRevisao) {
+        fRevisao.addEventListener('change', () => {
+            updateFilterOptions();
+            currentPage = 1;
+            renderQuestions();
+        });
+    }
+
+    // Filtros flashcards
+    // const fcDisciplinaFilter = document.getElementById('fcDisciplinaFilter');
+    //  const fcAssuntoFilter = document.getElementById('fcAssuntoFilter');
+
+    if (fcDisciplinaFilter) fcDisciplinaFilter.addEventListener('change', () => {
+        updateFCAssuntoOptions();
+        renderFlashcardsList();
+    });
+
+    if (fcAssuntoFilter) fcAssuntoFilter.addEventListener('change', renderFlashcardsList);
+
+    // Imagem
+    const inpImagem = document.getElementById('inpImagem');
+    const btnRemoverImg = document.getElementById('btnRemoverImg');
+    const btnInsertImgTag = document.getElementById('btnInsertImgTag');
+    const txtEnunciado = document.getElementById('enunciado');
+
+    if (inpImagem) {
+        inpImagem.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    let width = img.width,
+                        height = img.height;
+                    const MAX = 800;
+                    if (width > height && width > MAX) {
+                        height *= MAX / width;
+                        width = MAX;
+                    } else if (height > MAX) {
+                        width *= MAX / height;
+                        height = MAX;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const imgPreview = document.getElementById('imgPreview');
+                    if (imgPreview) imgPreview.src = canvas.toDataURL('image/jpeg', 0.7);
+                    if (imgPreview) imgPreview.style.display = 'block';
+                    const btnRemoverImg = document.getElementById('btnRemoverImg');
+                    if (btnRemoverImg) btnRemoverImg.style.display = 'inline-block';
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    if (btnRemoverImg) btnRemoverImg.addEventListener('click', () => {
+        const inpImagem = document.getElementById('inpImagem');
+        const imgPreview = document.getElementById('imgPreview');
+        const btnRemoverImg = document.getElementById('btnRemoverImg');
+        if (inpImagem) inpImagem.value = '';
+        if (imgPreview) imgPreview.style.display = 'none';
+        if (btnRemoverImg) btnRemoverImg.style.display = 'none';
+    });
+
+    if (btnInsertImgTag && txtEnunciado) {
+        btnInsertImgTag.addEventListener('click', () => {
+            txtEnunciado.value += " [IMAGEM] ";
+        });
+    }
+
+    // File input para import
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const json = JSON.parse(event.target.result);
+
+                    if (Array.isArray(json)) {
+                        BD = json;
+                        saveBD();
+                        showToast('Questões Importadas (Formato Antigo)!', 'success');
+                    } else if (json.questoes && json.flashcards) {
+                        BD = json.questoes || [];
+                        BD_FC = json.flashcards || [];
+                        saveBD();
+                        saveBD_FC();
+                        showToast('Backup Completo Restaurado!', 'success');
+                    } else {
+                        alert("Formato desconhecido.");
+                        return;
+                    }
+
+                    updateFilterOptions();
+                    updateFCFilters();
+                    renderQuestions();
+                    renderFlashcardsList();
+                } catch (e) {
+                    alert("Erro ao importar JSON.");
+                }
+            };
+            reader.readAsText(file);
+        });
+    }
+}
+
+// Verificar se o PWA está instalado e funcionando
+function checkPWAStatus() {
+    if (!navigator.onLine) {
+        console.log('Modo offline ativo');
+        showToast('Modo offline ativo - usando dados locais', 'info');
+    }
+
+    // Verificar service worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+            console.log('Service Worker pronto:', registration);
+        });
+    }
+}
+
+function loadTheme() {
+    const theme = localStorage.getItem('theme') || 'dark';
+    document.body.className = theme + '-mode';
+}
+
+function toggleTheme() {
+    const newTheme = document.body.classList.contains('dark-mode') ? 'light' : 'dark';
+    document.body.className = newTheme + '-mode';
+    localStorage.setItem('theme', newTheme);
+}
+
+function migrateOldQuestions() {
+    let count = 0;
+    BD.forEach(q => {
+        if (!q.dificuldade || q.dificuldade === "") {
+            q.dificuldade = 'Média';
+            count++;
+        }
+        if (!q.stats) q.stats = {
+            correct: 0,
+            wrong: 0
+        };
+    });
+    if (count > 0) saveBD();
 }
 
 // Inicializa a aplicação
@@ -2442,10 +2847,10 @@ window.checarResposta = checarResposta;
 window.mostrarResolucao = mostrarResolucao;
 window.proximaPergunta = proximaPergunta;
 window.pularPergunta = pularPergunta;
-window.editFC = editFC;
-window.delFC = delFC;
+window.editFC = window.editFC;
+window.delFC = window.delFC;
 window.exportDB = exportDB;
-window.importDB = importDB; // Agora usa o input file, mas mantemos a função global
+window.importDB = importDB;
 window.clearDB = clearDB;
 window.switchModule = switchModule;
 window.initQuiz = initQuiz;
@@ -2460,11 +2865,8 @@ window.mostrarSemana = mostrarSemana;
 window.reiniciarCronograma = reiniciarCronograma;
 window.mostrarSemana = mostrarSemana;
 window.importarMaterias = importarMaterias;
-window.processarDisciplinasImportadas = processarDisciplinasImportadas; // Função auxiliar
-window.selectTag = selectTag;
-window.selectTagFc = selectTagFc;
-window.toggleTheme = toggleTheme;
-window.flipCard = flipCard;
-window.answerFlashcard = answerFlashcard;
-window.changePageFc = changePageFc;
-window.changePage = changePage;
+window.processarDisciplinasImportadas = processarDisciplinasImportadas;
+window.abrirFormularioQuestaoRapido = abrirFormularioQuestaoRapido;
+window.abrirFormularioFlashcardRapido = abrirFormularioFlashcardRapido;
+window.iniciarTreinoRapido = iniciarTreinoRapido;
+window.verCronogramaRapido = verCronogramaRapido;
