@@ -1,30 +1,27 @@
-// app.js — Versão 9.1 (Correção Offline)
+// app.js — Versão 9.2 (Correção PWA)
 
 "use strict";
 
-// --- REGISTRO DO SERVICE WORKER (Substitui a bomba de cache) ---
+// --- REGISTRO DO SERVICE WORKER CORRIGIDO ---
 if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
     // Remove registros antigos primeiro
     navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (let registration of registrations) {
-            registration.unregister();
-            console.log('Service Worker antigo removido:', registration.scope);
-        }
+      for (let registration of registrations) {
+        registration.unregister();
+        console.log('Service Worker antigo removido:', registration.scope);
+      }
 
-        // Registra o novo Service Worker após limpeza
-        setTimeout(() => {
-            navigator.serviceWorker.register('/service-worker.js')
-                .then(function(registration) {
-                    console.log('✅ Service Worker registrado com sucesso: ', registration.scope);
-
-                    // Verifica se há atualização
-                    registration.update();
-                })
-                .catch(function(error) {
-                    console.log('❌ Falha no registro do Service Worker: ', error);
-                });
-        }, 100);
+      // Registra o novo Service Worker após limpeza
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(function(registration) {
+          console.log('✅ Service Worker registrado com sucesso: ', registration.scope);
+        })
+        .catch(function(error) {
+          console.log('❌ Falha no registro do Service Worker: ', error);
+        });
     });
+  });
 }
 
 // --- VERIFICAÇÃO DE CONECTIVIDADE ---
@@ -2490,6 +2487,9 @@ function atualizarHorasDia(numeroSemana, numeroDia, horas) {
    Inicialização Principal
 ----------------------------*/
 function init() {
+	console.log('🔍 Verificando ambiente PWA...');
+	console.log('URL atual:', window.location.href);
+	console.log('Display mode:', window.matchMedia('(display-mode: standalone)').matches ? 'standalone' : 'browser');
     loadTheme(); // 1. Tema
     initConnectivity(); // 2. Conectividade (NOVO)
     checkPWAStatus(); // 3. Verificação PWA (NOVO)

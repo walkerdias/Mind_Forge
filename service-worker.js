@@ -1,12 +1,12 @@
-const CACHE_NAME = "mindforge-v10-offline";
+const CACHE_NAME = "mindforge-v11-offline";
 const FILES_TO_CACHE = [
-  './',
-  './index.html', 
-  './style.css',
-  './app.js',
-  './manifest.json',
-  './icons/icon-192x192.png',
-  './icons/icon-512x512.png'
+  '/',
+  '/index.html',
+  '/style.css',
+  '/app.js',
+  '/manifest.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png'
 ];
 
 // Instalação
@@ -48,7 +48,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Interceptação de requisições
+// Interceptação de requisições - CORRIGIDO para PWA
 self.addEventListener('fetch', (event) => {
   // Ignora requisições não-GET
   if (event.request.method !== 'GET') return;
@@ -80,9 +80,10 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch(() => {
-            // Fallback para página offline
-            if (event.request.destination === 'document') {
-              return caches.match('./index.html');
+            // Fallback para página inicial - CORRIGIDO
+            if (event.request.destination === 'document' || 
+                event.request.url.match(/\/[^.]*$/)) {
+              return caches.match('/index.html');
             }
             // Para outros recursos, retorna resposta em cache ou faz fallback
             return caches.match(event.request);
