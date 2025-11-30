@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fundo circular -->
+  <circle cx="256" cy="256" r="256" fill="url(#gradient)"/>
+  
+  <!-- Bigorna -->
+  <path d="M150 320L362 320L362 360L150 360Z" fill="#7E7E7E"/>
+  <path d="M180 280L332 280L332 320L180 320Z" fill="#5D5D5D"/>
+  <path d="M210 250L302 250L302 280L210 280Z" fill="#4A4A4A"/>
+  
+  <!-- Cérebro -->
+  <path d="M256 120C300 120 350 150 350 250C350 300 300 350 256 350C212 350 162 300 162 250C162 150 212 120 256 120Z" fill="#4A90E2"/>
+  <path d="M256 140C285 140 310 165 310 250C310 285 285 310 256 310C227 310 202 285 202 250C202 165 227 140 256 140Z" fill="#6BA8F5"/>
+  
+  <!-- Detalhes do cérebro -->
+  <path d="M230 180C245 180 257 192 257 207C257 222 245 234 230 234C215 234 203 222 203 207C203 192 215 180 230 180Z" fill="white" fill-opacity="0.3"/>
+  <path d="M280 180C295 180 307 192 307 207C307 222 295 234 280 234C265 234 253 222 253 207C253 192 265 180 280 180Z" fill="white" fill-opacity="0.3"/>
+  
+  <!-- Faíscas -->
+  <path d="M256 350L250 400L262 400Z" fill="#FF6B35"/>
+  <path d="M240 340L230 370L235 375Z" fill="#FF6B35"/>
+  <path d="M270 340L280 370L275 375Z" fill="#FF6B35"/>
+  
+  <!-- Gradiente de fundo -->
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2C3E50"/>
+      <stop offset="100%" stop-color="#3498DB"/>
+    </linearGradient>
+  </defs>
+</svg>

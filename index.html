@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MindForge - Forjando Conhecimento</title>
+
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32x32.png">
+  <link rel="icon" type="image/png" sizes="72x72" href="icons/icon-72x72.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="icons/icon-96x96.png">
+  <link rel="icon" type="image/png" sizes="144x144" href="icons/icon-144x144.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192x192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0d1117"/> 
+    
+  <link rel="stylesheet" href="style.css">
+</head>
+<body> 
+  <!-- Container de Toast Notifications -->
+  <div id="toastContainer"></div>
+
+  <!-- Menu Mobile Toggle -->
+  <button id="mobileMenuToggle" class="mobile-menu-toggle" style="display: none;">☰</button>
+
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+      <div class="sidebar-header">
+        <h2>🧠 MindForge</h2>
+        <p class="sidebar-subtitle">Forje sua mente, transforme seu futuro</p>
+      </div>
+      
+      <div class="nav-section">
+        <h3>Módulos Principais</h3>
+        <button class="nav-item active" data-module="dashboard">
+          <span class="nav-icon">📊</span>
+          <span class="nav-text">Dashboard</span>
+        </button>
+        <button class="nav-item" data-module="questoes">
+          <span class="nav-icon">📝</span>
+          <span class="nav-text">Questões</span>
+        </button>
+        <button class="nav-item" data-module="flashcards">
+          <span class="nav-icon">🃏</span>
+          <span class="nav-text">Flashcards</span>
+        </button>
+        <button class="nav-item" data-module="cronograma">
+          <span class="nav-icon">📅</span>
+          <span class="nav-text">Cronograma</span>
+        </button>
+      </div>
+      
+      <div class="nav-section">
+        <h3>Análise & Metas</h3>
+        <button class="nav-item" data-module="estatisticas">
+          <span class="nav-icon">📈</span>
+          <span class="nav-text">Estatísticas</span>
+        </button>
+        <button class="nav-item" data-module="metas">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-text">Metas Diárias</span>
+        </button>
+        <button class="nav-item" data-module="desempenho">
+          <span class="nav-icon">📊</span>
+          <span class="nav-text">Desempenho</span>
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <h3>Configurações</h3>
+        <button id="themeToggleSidebar" class="nav-item">
+          <span class="nav-icon">🌙</span>
+          <span class="nav-text">Alternar Tema</span>
+        </button>
+        <button class="nav-item" data-module="backup">
+          <span class="nav-icon">💾</span>
+          <span class="nav-text">Backup & Dados</span>
+        </button>
+        <button class="nav-item" data-module="ajuda">
+          <span class="nav-icon">💡</span>
+          <span class="nav-text">Ajuda & Dicas</span>
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-progress">
+          <div class="progress-text">
+            <strong>Progresso Geral</strong>
+            <span id="sidebarProgress">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="sidebarProgressFill"></div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- ========================= -->
+      <!-- DASHBOARD MODULE -->
+      <!-- ========================= -->
+      <section id="dashboard" class="module active">
+        <div class="dashboard-header">
+          <div class="welcome-message">
+            <h1>Bem-vindo de volta! 👋</h1>
+            <p>Continue seus estudos e alcance suas metas</p>
+          </div>
+          <div class="current-time" id="currentTime"></div>
+        </div>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid">
+          <div class="stat-card primary">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-info">
+              <h3>Meta Diária</h3>
+              <div class="stat-value" id="dashboardGoal">0/20</div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="dashboardProgressFill"></div>
+              </div>
+              <div class="stat-trend" id="goalTrend">+0% hoje</div>
+            </div>
+          </div>
+
+          <div class="stat-card secondary">
+            <div class="stat-icon">📝</div>
+            <div class="stat-info">
+              <h3>Banco de Questões</h3>
+              <div class="stat-value" id="dashboardQuestions">0</div>
+              <div class="stat-subtitle">questões cadastradas</div>
+              <div class="stat-trend" id="questionsTrend">+0 esta semana</div>
+            </div>
+          </div>
+
+          <div class="stat-card success">
+            <div class="stat-icon">🃏</div>
+            <div class="stat-info">
+              <h3>Flashcards</h3>
+              <div class="stat-value" id="dashboardFlashcards">0</div>
+              <div class="stat-subtitle">cards para estudar</div>
+              <div class="stat-trend" id="flashcardsTrend">+0 novos</div>
+            </div>
+          </div>
+
+          <div class="stat-card warning">
+            <div class="stat-icon">📅</div>
+            <div class="stat-info">
+              <h3>Cronograma</h3>
+              <div class="stat-value" id="dashboardSchedule">0%</div>
+              <div class="stat-subtitle">concluído</div>
+              <div class="stat-trend" id="scheduleTrend">No prazo</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+		<div class="quick-actions">
+			<h2>Ações Rápidas</h2>
+			<div class="actions-grid">
+				<button class="action-btn" onclick="abrirFormularioQuestaoRapido()">
+					<span class="action-icon">➕</span>
+					<span class="action-text">Nova Questão</span>
+					<span class="action-desc">Adicione ao banco</span>
+				</button>
+				<button class="action-btn" onclick="abrirFormularioFlashcardRapido()">
+					<span class="action-icon">🃏</span>
+					<span class="action-text">Novo Flashcard</span>
+					<span class="action-desc">Crie um card</span>
+				</button>
+				<button class="action-btn" onclick="iniciarTreinoRapido()">
+					<span class="action-icon">🎯</span>
+					<span class="action-text">Iniciar Treino</span>
+					<span class="action-desc">Pratique agora</span>
+				</button>
+				<button class="action-btn" onclick="verCronogramaRapido()">
+					<span class="action-icon">📅</span>
+					<span class="action-text">Ver Cronograma</span>
+					<span class="action-desc">Planeje estudos</span>
+				</button>
+			</div>
+		</div>
+
+        <!-- Recent Activity & Performance -->
+        <div class="dashboard-row">
+          <div class="recent-activity">
+            <h3>Atividade Recente</h3>
+            <div class="activity-list" id="recentActivity">
+              <div class="activity-item">
+                <span class="activity-icon">📝</span>
+                <div class="activity-content">
+                  <p>Nenhuma atividade recente</p>
+                  <span class="activity-time">Comece a estudar!</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="performance-overview">
+            <h3>Desempenho da Semana</h3>
+            <div class="performance-chart">
+              <div id="weeklyPerformance" class="chart-placeholder">
+                <p>Seus dados de desempenho aparecerão aqui</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- QUESTÕES MODULE -->
+      <!-- ========================= -->
+      <section id="questoes" class="module">
+        <div class="module-header">
+          <h2>📝 Banco de Questões</h2>
+          <div class="module-actions">
+            <button id="btnNovoQuestao" class="btn primary">+ Nova Questão</button>
+            <button id="btnQuizQuestao" class="btn secondary">🎯 Modo Treino</button>
+            <button id="btnExportQuestao" class="btn secondary">📤 Exportar</button>
+            <button id="btnImportQuestao" class="btn secondary">📥 Importar</button>
+          </div>
+        </div>
+
+        <!-- Content from original questões section -->
+        <div class="card">
+          <div class="top-bar">
+            <div class="search">
+                <input id="fSearch" type="text" placeholder="Pesquisar (enunciado, tags)...">
+            </div>
+            
+            <div class="search" style="margin-top: 5px; margin-bottom: 5px;">
+                <select id="fDisciplina">
+                    <option value="">Todas as disciplinas</option>
+                </select>
+                <select id="fAssunto">
+                    <option value="">Todos os assuntos</option>
+                </select>
+            </div>
+
+            <div class="search" style="margin-top: 5px; margin-bottom: 5px;">
+                <select id="fBanca"></select>
+                <select id="fAno"></select>
+                <select id="fDificuldade" style="max-width: 130px;">
+                    <option value="">Dificuldade</option>
+                    <option value="Fácil">🟢 Fácil</option>
+                    <option value="Média">🟡 Média</option>
+                    <option value="Difícil">🔴 Difícil</option>
+                </select>
+            </div>
+            
+            <div class="search filtros-avancados" style="margin-top: 5px; display:flex; align-items:center; gap: 10px; flex-wrap: wrap;">
+                <div class="notebook-controls" style="display: flex; gap: 5px; flex-grow: 1; align-items: center;">
+                    <select id="savedFilters" style="margin: 0; min-width: 150px;">
+                        <option value="">📂 Meus Cadernos...</option>
+                    </select>
+                    <button id="btnSaveFilter" class="btn secondary" style="padding: 8px 10px;" title="Salvar Filtro Atual">💾</button>
+                    <button id="btnDeleteFilter" class="btn secondary" style="padding: 8px 10px; display:none; color: var(--danger);" title="Excluir Caderno">🗑️</button>
+                </div>
+
+                <label class="checkbox-label" style="white-space: nowrap;">
+                    <input type="checkbox" id="fRevisao"> 🚩 Revisão
+                </label>
+                
+                <div style="display:flex; align-items:center; gap:5px;">
+                    <label for="fQtdTreino" style="margin:0; font-size:0.85rem;">Qtd:</label>
+                    <select id="fQtdTreino" style="width:auto; padding:5px; margin:0;">
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="0">Tudo</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="timerContainer" style="display: none; text-align: center; margin: 10px 0;">
+                <span id="quizTimer" class="quiz-timer">00:00</span>
+            </div>
+          </div>
+          
+          <p id="questoesCount" class="meta" style="margin: 0 0 10px 5px; font-weight: bold; min-height: 20px;"></p>
+          
+          <div id="lista" class="list">
+            <p class="meta">Carregando questões...</p>
+          </div>
+          
+          <div id="paginationControls" class="pagination-controls" style="display:none;">
+            <button id="btnPrevPage" class="btn secondary">Anterior</button>
+            <span id="pageInfo" style="font-size: 0.9rem; color: var(--text-muted);"></span>
+            <button id="btnNextPage" class="btn secondary">Próxima</button>
+          </div>
+
+          <div id="resultado" style="margin-top: 15px;"></div>
+          <div id="quizActions" style="text-align: right; margin-top: 10px;"></div>
+        </div>
+
+        <!-- Formulário Questão -->
+        <div id="formCard" class="card" style="display: none;">
+          <!-- Form content remains the same -->
+          <form id="form">
+            <h3>Adicionar / Editar Questão</h3>
+            <input id="qid" type="hidden"> 
+            
+            <label>Disciplina
+              <input id="disciplina" type="text" placeholder="Ex: Direito Constitucional">
+            </label>
+
+            <div class="options">
+                <label style="margin-top:0;">Ano <input id="ano" type="number" placeholder="Ex: 2023"></label>
+                <label style="margin-top:0;">Banca <input id="banca" type="text" placeholder="Ex: CESPE"></label>
+            </div>
+
+            <label>Assunto (Ex: História Geral)
+              <input id="assunto" type="text">
+            </label>
+
+            <label>Tópico (Ex: Revolução Francesa)
+              <input id="topico" type="text">
+            </label>
+
+            <label>Nível de Dificuldade
+                <select id="dificuldade">
+                    <option value="">-- Selecione --</option>
+                    <option value="Fácil">🟢 Fácil</option>
+                    <option value="Média">🟡 Média</option>
+                    <option value="Difícil">🔴 Difícil</option>
+                </select>
+            </label>
+            
+            <label>Imagem (Máx 800px)</label>
+            <input type="file" id="inpImagem" accept="image/*" style="margin-top:5px;">
+            <div style="margin-top:10px;">
+                <img id="imgPreview" src="" alt="Preview" style="max-width:100%; max-height:200px; display:none; border-radius:8px; border:1px solid var(--border);">
+                <button type="button" id="btnRemoverImg" class="btn secondary" style="display:none; margin-top:5px; font-size:0.8rem; padding:5px 10px;">Remover Imagem</button>
+            </div>
+
+            <label style="display:flex; justify-content:space-between; align-items:center;">
+                Enunciado / Pergunta
+                <button type="button" id="btnInsertImgTag" class="btn secondary" style="font-size:0.7rem; padding:2px 8px;">+ Inserir [IMAGEM]</button>
+            </label>
+            <textarea id="enunciado"></textarea>
+            
+            <label>Opções</label>
+            <div class="options">
+              <label>A <input id="optA" type="text"></label>
+              <label>B <input id="optB" type="text"></label>
+              <label>C <input id="optC" type="text"></label>
+              <label>D <input id="optD" type="text"></label>
+              <label>E <input id="optE" type="text"></label>
+            </div>
+
+            <label>Resposta correta
+              <select id="correta">
+                <option value="">-- escolha --</option>
+                <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
+              </select>
+            </label>
+
+            <label>Comentário / Resolução
+              <textarea id="resolucao"></textarea>
+            </label>
+
+            <label>Tags (separadas por vírgula)
+              <input id="tags" type="text">
+            </label>
+
+            <div class="form-actions">
+              <button id="btnSalvar" class="btn primary">Salvar Questão</button>
+              <button id="btnCancelar" type="button" class="btn secondary">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- FLASHCARDS MODULE -->
+      <!-- ========================= -->
+      <section id="flashcards" class="module">
+        <div class="module-header">
+          <h2>🃏 Flashcards</h2>
+          <div class="module-actions">
+            <button id="btnNovoFC" class="btn primary">+ Novo Flashcard</button>
+            <button id="btnQuizFC" class="btn secondary">🎓 Estudar Flashcards</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <!-- Flashcard Player -->
+          <div id="fcPlayer" style="display: none;">
+            <div class="fc-scene">
+                <div class="fc-card" id="fcCardElement">
+                    <div class="fc-face fc-front">
+                        <span class="fc-label">FRENTE</span>
+                        <div id="fcContentFront"></div>
+                        <div class="fc-instruction">(Clique para virar)</div>
+                    </div>
+                    <div class="fc-face fc-back">
+                        <span class="fc-label">VERSO</span>
+                        <div id="fcContentBack"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fc-controls">
+                <button id="btnFcPrev" class="btn secondary">❮ Anterior</button>
+                <button id="btnFcFlip" class="btn primary">🔄 Virar</button>
+                <button id="btnFcNext" class="btn secondary">Próximo ❯</button>
+            </div>
+            <button id="btnFcExit" class="btn secondary" style="width:100%; margin-top:10px;">Sair do Estudo</button>
+          </div>
+
+          <!-- Flashcard List -->
+          <div id="fcListContainer">
+            <div class="search">
+                 <input id="fcSearch" type="text" placeholder="Pesquisar Flashcards...">
+            </div>
+            
+            <div class="search" style="margin-top: 5px;">
+                <select id="fcDisciplinaFilter">
+                    <option value="">Todas as disciplinas</option>
+                </select>
+                <select id="fcAssuntoFilter">
+                    <option value="">Todos os assuntos</option>
+                </select>
+            </div>
+
+            <p id="fcCount" class="meta" style="margin: 10px 0;"></p>
+            <div id="listaFlashcards" class="list">
+                <!-- Flashcard items rendered via JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Flashcard Form -->
+        <div id="formCardFC" class="card" style="display: none;">
+          <form id="formFC">
+            <h3>Novo Flashcard</h3>
+            <input id="fcId" type="hidden"> 
+            
+            <label>Disciplina
+              <input id="fcDisciplina" type="text" placeholder="Ex: Direito Administrativo">
+            </label>
+
+            <label>Assunto / Título
+              <input id="fcAssunto" type="text" placeholder="Ex: Atos Administrativos">
+            </label>
+
+            <label>FRENTE (Pergunta / Conceito)
+              <textarea id="fcFrente" rows="4" placeholder="O que vai aparecer primeiro..."></textarea>
+            </label>
+
+            <label>VERSO (Resposta / Explicação)
+              <textarea id="fcVerso" rows="6" placeholder="A resposta que aparece ao virar..."></textarea>
+            </label>
+
+            <div class="form-actions">
+              <button type="submit" class="btn primary">Salvar Flashcard</button>
+              <button type="button" id="btnCancelarFC" class="btn secondary">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- CRONOGRAMA MODULE -->
+      <!-- ========================= -->
+      <section id="cronograma" class="module">
+        <div class="module-header">
+          <h2>📅 Cronograma de Estudos</h2>
+          <div class="module-actions">
+            <button onclick="gerarCronograma()" class="btn primary">🔄 Gerar Cronograma</button>
+            <button onclick="reiniciarCronograma()" class="btn secondary">🗑️ Reiniciar</button>
+          </div>
+        </div>
+
+        <div class="card" id="cronogramaCard">
+          <div class="modal-header">
+            <h3>📅 Cronograma de Estudos</h3>
+            <button id="btnToggleCronograma" class="btn secondary">▼</button>
+          </div>
+          
+          <div id="cronogramaContent" style="display: block;">
+            <!-- Setup do Cronograma -->
+            <div id="cronogramaSetup">
+              <h4 style="margin-bottom: 20px; color: var(--text-primary);">Configurar Cronograma</h4>
+              
+              <!-- Grid melhorado para configurações -->
+              <div class="cronograma-config-grid">
+                <div class="config-group">
+                  <label for="dataProva" class="config-label">
+                    <span class="config-icon">📅</span>
+                    Data da Prova
+                  </label>
+                  <input type="date" id="dataProva" class="config-input">
+                </div>
+                
+                <div class="config-group">
+                  <label for="diasSemana" class="config-label">
+                    <span class="config-icon">📆</span>
+                    Dias por semana
+                  </label>
+                  <select id="diasSemana" class="config-select">
+                    <option value="3">3 dias</option>
+                    <option value="4">4 dias</option>
+                    <option value="5" selected>5 dias</option>
+                    <option value="6">6 dias</option>
+                    <option value="7">7 dias</option>
+                  </select>
+                </div>
+
+                <div class="config-group">
+                  <label for="horasDia" class="config-label">
+                    <span class="config-icon">⏱️</span>
+                    Horas por dia
+                  </label>
+                  <select id="horasDia" class="config-select">
+                    <option value="1">1 hora</option>
+                    <option value="2" selected>2 horas</option>
+                    <option value="3">3 horas</option>
+                    <option value="4">4 horas</option>
+                    <option value="5">5 horas</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Seção de Matérias Melhorada -->
+              <div class="materias-section">
+                <h5 class="materias-title">
+                  <span class="materias-icon">📚</span>
+                  Matérias do Cronograma
+                  <span class="materias-count" id="materiasCount">0 matérias</span>
+                </h5>
+                
+                <div class="materias-input-group">
+                  <input type="text" id="novaMateria" placeholder="Digite o nome da matéria" class="materia-input">
+                  <div class="materias-buttons">
+                    <button type="button" onclick="adicionarMateriaCronograma()" class="btn primary">
+                      <span class="btn-icon">+</span>
+                      Adicionar
+                    </button>
+						<button type="button" onclick="importarMaterias()" class="btn secondary">
+							<span class="btn-icon">📥</span>
+								Importar do Banco
+						</button>
+                  </div>
+                </div>
+                
+                <div id="listaMateriasCronograma" class="materias-list"></div>
+              </div>
+
+              <button onclick="gerarCronograma()" class="btn primary generate-btn">
+                <span class="btn-icon">🚀</span>
+                Gerar Cronograma
+              </button>
+            </div>
+
+            <!-- Visualização do Cronograma -->
+            <div id="cronogramaView" style="display:none;">
+              <div id="resumoCronograma" class="cronograma-resumo"></div>
+              
+              <div id="tabsSemanas" class="semanas-tabs"></div>
+              
+              <div id="conteudoCronograma" class="semanas-conteudo"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- ESTATÍSTICAS MODULE -->
+      <!-- ========================= -->
+      <section id="estatisticas" class="module">
+        <div class="module-header">
+          <h2>📈 Estatísticas Detalhadas</h2>
+        </div>
+        <div class="card">
+          <div id="statsBody">
+            <!-- Statistics will be loaded here -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- METAS MODULE -->
+      <!-- ========================= -->
+      <section id="metas" class="module">
+        <div class="module-header">
+          <h2>🎯 Metas e Progresso</h2>
+        </div>
+        <div class="card">
+          <div class="goals-container">
+            <div class="goal-config">
+              <h3>Configurar Meta Diária</h3>
+              <div class="goal-inputs">
+                <label>
+                  Questões por dia:
+                  <input type="number" id="dailyGoalInput" min="1" max="100" value="20">
+                </label>
+                <button onclick="updateDailyGoalTarget()" class="btn primary">Atualizar Meta</button>
+              </div>
+            </div>
+            
+            <div class="goal-progress">
+              <h3>Progresso do Dia</h3>
+              <div class="progress-display">
+                <div class="progress-text">
+                  <span id="currentProgress">0</span> de <span id="targetProgress">20</span> questões
+                </div>
+                <div class="progress-bar large">
+                  <div class="progress-fill" id="goalProgressFill"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="weekly-stats">
+              <h3>Estatísticas da Semana</h3>
+              <div class="week-grid" id="weekStats">
+                <div class="day-stat completed">
+            <div class="day-name">Seg</div>
+            <div class="day-date">15/01</div>
+            <div class="day-progress">18</div>
+            <div class="day-target">de 20</div>
+            <div class="day-status status-completed">Concluído</div>
+            <div class="day-progress-bar">
+                <div class="day-progress-fill completed" style="width: 90%"></div>
+            </div>
+        </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- BACKUP MODULE -->
+      <!-- ========================= -->
+      <section id="backup" class="module">
+        <div class="module-header">
+          <h2>💾 Backup e Dados</h2>
+        </div>
+        <div class="card">
+          <div class="backup-actions">
+            <div class="backup-card">
+              <h3>Exportar Dados</h3>
+              <p>Salve seu progresso e questões em um arquivo</p>
+              <button onclick="exportDB()" class="btn primary">📤 Exportar Tudo</button>
+            </div>
+            
+            <div class="backup-card">
+              <h3>Importar Dados</h3>
+              <p>Restaure de um backup anterior</p>
+              <button onclick="importDB()" class="btn secondary">📥 Importar Backup</button>
+            </div>
+            
+            <div class="backup-card danger">
+              <h3>Limpar Dados</h3>
+              <p>Remover todas as questões e flashcards</p>
+              <button onclick="clearDB()" class="btn" style="background: var(--danger); color: white;">🗑️ Limpar Tudo</button>
+            </div>
+          </div>
+
+          <div class="data-info">
+            <h3>Informações do Banco</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-label">Questões:</span>
+                <span class="info-value" id="backupQuestions">0</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Flashcards:</span>
+                <span class="info-value" id="backupFlashcards">0</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Último Backup:</span>
+                <span class="info-value" id="lastBackup">Nunca</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= -->
+      <!-- AJUDA MODULE -->
+      <!-- ========================= -->
+      <section id="ajuda" class="module">
+        <div class="module-header">
+          <h2>💡 Ajuda e Dicas</h2>
+        </div>
+        <div class="card">
+          <div class="help-sections">
+            <div class="help-section">
+              <h3>📝 Como Usar as Questões</h3>
+              <ul>
+                <li>Adicione questões com enunciado, alternativas e resposta correta</li>
+                <li>Use tags para organizar por tópicos específicos</li>
+                <li>Marque questões para revisão com a bandeira 🚩</li>
+                <li>Use o Modo Treino para praticar com timer</li>
+              </ul>
+            </div>
+
+            <div class="help-section">
+              <h3>🃏 Estudando com Flashcards</h3>
+              <ul>
+                <li>Crie cards para conceitos que precisa memorizar</li>
+                <li>Use o modo estudo para revisar os flashcards</li>
+                <li>Organize por disciplina e assunto</li>
+              </ul>
+            </div>
+
+            <div class="help-section">
+              <h3>📅 Cronograma Inteligente</h3>
+              <ul>
+                <li>Configure sua data de prova</li>
+                <li>Adicione as matérias que precisa estudar</li>
+                <li>O sistema distribui automaticamente o conteúdo</li>
+                <li>Marque os dias concluídos para acompanhar progresso</li>
+              </ul>
+            </div>
+
+            <div class="help-section">
+              <h3>🎯 Metas e Estatísticas</h3>
+              <ul>
+                <li>Acompanhe seu progresso diário</li>
+                <li>Veja estatísticas de acerto por disciplina</li>
+                <li>Exporte seus dados regularmente</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <input type="file" id="fileInput" accept=".json, .csv" style="display: none;">
+
+  <!-- Modal de Estatísticas -->
+  <dialog id="statsModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Estatísticas de Desempenho</h2>
+        <button id="btnCloseStats" class="btn secondary">Fechar</button>
+      </div>
+      <div id="statsBodyModal" class="modal-body"></div>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
