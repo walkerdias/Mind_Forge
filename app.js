@@ -2,23 +2,27 @@
 
 "use strict";
 
-// --- REGISTRO DO SERVICE WORKER CORRIGIDO ---
+// --- REGISTRO DO SERVICE WORKER CORRIGIDO PARA PWA ---
 if ('serviceWorker' in navigator) {
+  // Aguarda a página carregar completamente
   window.addEventListener('load', function() {
-    // Remove registros antigos primeiro
+    // Limpa service workers antigos
     navigator.serviceWorker.getRegistrations().then(function(registrations) {
       for (let registration of registrations) {
         registration.unregister();
-        console.log('Service Worker antigo removido:', registration.scope);
+        console.log('Service Worker antigo removido');
       }
-
-      // Registra o novo Service Worker após limpeza
-      navigator.serviceWorker.register('/service-worker.js')
+      
+      // Registra o novo service worker
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
         .then(function(registration) {
-          console.log('✅ Service Worker registrado com sucesso: ', registration.scope);
+          console.log('✅ Service Worker registrado com sucesso no escopo:', registration.scope);
+          
+          // Verifica se há uma nova versão
+          registration.update();
         })
         .catch(function(error) {
-          console.log('❌ Falha no registro do Service Worker: ', error);
+          console.log('❌ Falha no registro do Service Worker:', error);
         });
     });
   });
@@ -49,12 +53,14 @@ function initConnectivity() {
 // --- VERIFICAÇÃO DO PWA ---
 function checkPWAStatus() {
     // Verifica se está instalado como PWA
-    if (window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true) {
-        console.log('📱 Executando como PWA instalado');
-    } else {
-        console.log('🌐 Executando no navegador');
-    }
+  const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                window.navigator.standalone === true;
+  
+  console.log(isPWA ? '📱 Executando como PWA' : '🌐 Executando no navegador');
+  
+  if (isPWA) {
+    document.body.classList.add('pwa-mode');
+  }
 
     // Verifica service worker
     if ('serviceWorker' in navigator) {
@@ -2487,13 +2493,17 @@ function atualizarHorasDia(numeroSemana, numeroDia, horas) {
    Inicialização Principal
 ----------------------------*/
 function init() {
+	console.log('🔍 Iniciando MindForge...');
+	console.log('📍 Path:', window.location.pathname);
 	console.log('🔍 Verificando ambiente PWA...');
 	console.log('URL atual:', window.location.href);
 	console.log('Display mode:', window.matchMedia('(display-mode: standalone)').matches ? 'standalone' : 'browser');
-    loadTheme(); // 1. Tema
+    
+	// Verifica PWA primeiro
+	checkPWAStatus();
+	loadTheme(); // 1. Tema
     initConnectivity(); // 2. Conectividade (NOVO)
-    checkPWAStatus(); // 3. Verificação PWA (NOVO)
-
+    
     // 4. Sistema existente
     initDailyGoal();
     populateSavedFilters();
@@ -2536,7 +2546,8 @@ function init() {
     }
 
     // Configura event listeners existentes
-    setupEventListeners();
+    setupNavigation();
+	setupEventListeners();
 
     // Ajusta visibilidade do toggle mobile baseado no tamanho da tela
     function checkMobileMenu() {
@@ -2551,6 +2562,20 @@ function init() {
 
     console.log('🧠 MindForge inicializado com suporte offline');
 }
+
+function setupNavigation() {
+  // Event Listeners para navegação
+  document.querySelectorAll('.nav-item[data-module]').forEach(item => {
+    item.addEventListener('click', function() {
+      switchModule(this.dataset.module);
+    });
+  });
+
+  // Tema na sidebar
+  const themeToggleSidebar = document.getElementById('themeToggleSidebar');
+  if (themeToggleSidebar) {
+    themeToggleSidebar.addEventListener('click', toggleTheme);
+  }
 
 function setupEventListeners() {
     // Questões
