@@ -1,12 +1,19 @@
 const CACHE_NAME = "mindforge-v12-offline";
 const FILES_TO_CACHE = [
-  './', // Representa a raiz do escopo (ex: /repo-name/ ou /)
-  'index.html',
-  'style.css',
-  'app.js',
-  'manifest.json',
-  'icons/icon-192x192.png',
-  'icons/icon-512x512.png'
+  '/',
+  '/index.html',
+  '/style.css',
+  '/app.js',
+  '/manifest.json',
+  // Adicione todos os seus ícones e arquivos estáticos essenciais aqui
+  '/icons/icon-72x72.png',
+  '/icons/icon-96x96.png',
+  '/icons/icon-128x128.png',
+  '/icons/icon-144x144.png',
+  '/icons/icon-152x152.png',
+  '/icons/icon-192x192.png',
+  '/icons/icon-384x384.png',
+  '/icons/icon-512x512.png'
 ];
 
 // Instalação
@@ -20,6 +27,7 @@ self.addEventListener('install', (event) => {
       })
       .then(() => {
         console.log('✅ Service Worker: Instalação completa');
+        // Força o novo Service Worker a esperar o mínimo possível
         return self.skipWaiting();
       })
       .catch(error => {
@@ -35,17 +43,22 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
+          // Deleta caches que não correspondem ao CACHE_NAME atual
           if (cacheName !== CACHE_NAME) {
             console.log('🗑️ Service Worker: Deletando cache antigo:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      // Importante: Assume o controle de todas as páginas imediatamente
+      console.log('⭐ Service Worker: Reivindicando clientes...');
+      return self.clients.claim();
+    })
   );
 });
 
-// Fetch - Estratégia Cache, depois Network com Fallback
+// Estratégia de Cache-First, Network-Fallback
 self.addEventListener('fetch', (event) => {
   // Ignora requisições não-GET e chrome-extension
   if (event.request.method !== 'GET' || event.request.url.startsWith('chrome-extension://')) return;
@@ -53,26 +66,25 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
-        // Se encontrou no cache, retorna
+        // 1. Se encontrou no cache, retorna
         if (response) {
           return response;
         }
 
-        // Se é uma navegação (HTML), sempre tenta retornar index.html do cache
+        // 2. Se é uma navegação (URL principal, como um clique em link), 
+        // tenta buscar na rede, mas com fallback para index.html se offline
         if (event.request.mode === 'navigate') {
-          return caches.match('index.html') // Usa o caminho relativo
-             .then(cacheResponse => {
-                 if (cacheResponse) return cacheResponse;
-                 return fetch(event.request); // Tenta a rede se index.html não estiver no cache (erro improvável após o install)
-             })
-             .catch(() => caches.match('index.html')); // Fallback final para index.html
+          return fetch(event.request)
+            .catch(() => {
+              // Se a rede falhar (offline), retorna o index.html do cache
+              return caches.match('/index.html');
+            });
         }
 
-
-        // Para outros recursos, tenta buscar na rede
+        // 3. Para outros recursos (JS, CSS, Imagens), tenta buscar na rede
         return fetch(event.request)
           .then((networkResponse) => {
-            // Se a resposta é válida, adiciona ao cache
+            // Se a resposta é válida, adiciona ao cache (Cache-First com atualização)
             if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
               const responseToCache = networkResponse.clone();
               caches.open(CACHE_NAME)
@@ -83,12 +95,8 @@ self.addEventListener('fetch', (event) => {
             return networkResponse;
           })
           .catch(() => {
-            // Fallback para recursos que não são navegação
-            if (event.request.destination === 'image') {
-              return new Response('', { status: 404 });
-            }
-            // Retorna a página offline padrão ou um erro
-            return new Response('Sem conexão e recurso não cacheado.', { status: 503, statusText: 'Service Unavailable' });
+            // Fallback simples se a rede falhar e não estiver no cache (normalmente falhará)
+            return new Response('', { status: 404, statusText: 'Não encontrado no cache ou rede offline.' });
           });
       })
   );
