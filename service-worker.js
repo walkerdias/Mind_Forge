@@ -1,4 +1,4 @@
-const CACHE_NAME = "mindforge-v11-offline";
+const CACHE_NAME = "mindforge-v12-offline";
 const FILES_TO_CACHE = [
   '/',
   '/index.html',
