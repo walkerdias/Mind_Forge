@@ -7,7 +7,6 @@
   "display": "standalone",
   "start_url": "index.html",
   "scope": "./",
-  "scope": "/",
   "orientation": "any",
   "categories": ["education", "productivity"],
   "icons": [
@@ -58,4 +57,5 @@
       "type": "image/png"
     }
   ]
+
 }
