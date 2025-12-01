@@ -1,30 +1,37 @@
-// app.js — Versão 9.1 (Correção Offline)
+// app.js — Versão 9.2 (Correção PWA)
 
 "use strict";
 
-// --- REGISTRO DO SERVICE WORKER (Substitui a bomba de cache) ---
+// --- REGISTRO DO SERVICE WORKER CORRIGIDO PARA PWA ---
+// A base URL é o caminho até a pasta do index.html (ex: /repo-name/)
+// Isso é crucial para o GitHub Pages ou qualquer subdiretório de deploy,
+// pois o Service Worker precisa do caminho completo, incluindo o nome do repositório.
+const BASE_PATH = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+
 if ('serviceWorker' in navigator) {
-    // Remove registros antigos primeiro
-    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (let registration of registrations) {
-            registration.unregister();
-            console.log('Service Worker antigo removido:', registration.scope);
+    // Aguarda a página carregar completamente
+	window.addEventListener('load', function() {
+		// Remove registros antigos primeiro
+		navigator.serviceWorker.getRegistrations().then(function(registrations) {
+			for (let registration of registrations) {
+				registration.unregister();
+				console.log('Service Worker antigo removido:', registration.scope);
         }
 
-        // Registra o novo Service Worker após limpeza
-        setTimeout(() => {
-            navigator.serviceWorker.register('/service-worker.js')
-                .then(function(registration) {
-                    console.log('✅ Service Worker registrado com sucesso: ', registration.scope);
+      // Registra o novo service worker usando o BASE_PATH dinâmico
+      navigator.serviceWorker.register(BASE_PATH + 'service-worker.js', { scope: BASE_PATH })
+        .then(function(registration) {
+          console.log('✅ Service Worker registrado com sucesso no escopo:', registration.scope);
 
-                    // Verifica se há atualização
-                    registration.update();
-                })
-                .catch(function(error) {
-                    console.log('❌ Falha no registro do Service Worker: ', error);
-                });
-        }, 100);
+          // Verifica se há uma nova versão
+          registration.update();
+        })
+        .catch(function(error) {
+          console.log('❌ Falha no registro do Service Worker:', error);
+          console.error('Caminho de registro tentado:', BASE_PATH + 'service-worker.js', 'Escopo tentado:', BASE_PATH);
+        });
     });
+  });
 }
 
 // --- VERIFICAÇÃO DE CONECTIVIDADE ---
@@ -45,7 +52,7 @@ function initConnectivity() {
     // Verificar status inicial
     if (!navigator.onLine) {
         document.body.classList.add('offline');
-        console.log('Iniciando em modo offline');
+        showToast('Modo Offline Ativo!', 'warning');
     }
 }
 
